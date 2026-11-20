@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>GameCube</string>
+	<string>Jiggle Jam</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,6 +23,6 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.kids-games</string>
 	<key>NSCameraUsageDescription</key>
-	<string>GameCube uses the camera to see your moves so you can play games with your body.</string>
+	<string>Jiggle Jam uses the camera to see your moves so you can play games with your body.</string>
 </dict>
 </plist>

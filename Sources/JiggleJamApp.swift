@@ -3,7 +3,7 @@ import SpriteKit
 import AVFoundation
 
 @main
-struct GameCubeApp: App {
+struct JiggleJamApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -73,7 +73,7 @@ struct MenuView: View {
             Color.black.opacity(0.45).ignoresSafeArea()
 
             VStack(spacing: 28) {
-                Text("GameCube")
+                Text("Jiggle Jam")
                     .font(.system(size: 64, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
 

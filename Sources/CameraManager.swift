@@ -18,7 +18,7 @@ struct PoseFrame {
 }
 
 extension Notification.Name {
-    static let cameraDidSwitch = Notification.Name("GameCube.cameraDidSwitch")
+    static let cameraDidSwitch = Notification.Name("JiggleJam.cameraDidSwitch")
 }
 
 /// Owns the camera session and runs Vision body-pose detection on every frame.
@@ -31,8 +31,8 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var authorization = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var peopleCount = 0
 
-    private let sessionQueue = DispatchQueue(label: "gamecube.session")
-    private let videoQueue = DispatchQueue(label: "gamecube.video", qos: .userInteractive)
+    private let sessionQueue = DispatchQueue(label: "jigglejam.session")
+    private let videoQueue = DispatchQueue(label: "jigglejam.video", qos: .userInteractive)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let poseRequest = VNDetectHumanBodyPoseRequest()
     private let lock = NSLock()

@@ -1,4 +1,4 @@
-# GameCube
+# Jiggle Jam
 
 Movement games for little kids, played on the TV. The Mac's camera (or an iPhone via
 Continuity Camera) watches the player, Apple's Vision framework tracks their body, and the
@@ -15,7 +15,7 @@ Requires macOS 14+, Xcode, and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
 ```sh
 xcodegen generate
-open GameCube.xcodeproj   # then ⌘R
+open JiggleJam.xcodeproj   # then ⌘R
 ```
 
 ## Playing on the TV
@@ -33,4 +33,4 @@ open GameCube.xcodeproj   # then ⌘R
 | `Sources/CameraManager.swift` | Capture session, camera picking, Vision body-pose per frame → hand/foot points |
 | `Sources/CameraPreview.swift` | Mirrored live camera background |
 | `Sources/BubbleScene.swift` | SpriteKit game: spawning, collisions, effects, sound, speech |
-| `Sources/GameCubeApp.swift` | App, parent menu, game screen |
+| `Sources/JiggleJamApp.swift` | App, parent menu, game screen |
