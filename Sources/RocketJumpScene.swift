@@ -88,7 +88,9 @@ final class RocketJumpScene: GameScene {
 
     override func tick(dt: TimeInterval, pose: PoseFrame) {
         now += dt
-        if jumper.update(pose, now: now), let body = jumper.player {
+        let didJump = jumper.update(pose, now: now)
+        if jumper.easedJustNow { say("Little jumps work too!") }
+        if didJump, let body = jumper.player {
             jumped(body: body, imageSize: pose.imageSize)
         }
 

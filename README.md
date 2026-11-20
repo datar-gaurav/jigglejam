@@ -20,6 +20,13 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
   (knees taking turns), jump to jump. No enemies or pits: crates block the way until you jump
   over or onto them, fruit to collect, and a party at home at the end of each level.
 
+Every game starts with a short **setup**: a big mirrored view with what the camera sees, one
+spoken instruction and a checklist (hands, feet, wheel held flat…). It says "Ready!" once
+everything is ✅ for a second, or starts anyway after 10 seconds; Return skips it.
+
+Fox Trail's first level begins with practice ("March to walk!", then "Now jump!"). In the
+jumping games, three "almost jumps" in a row make jumping easier ("Little jumps work too!").
+
 If a player gets so close that their feet leave the frame, the game pauses with a
 "take a big step back" warning. Turn it off with **Warn when too close** in the menu.
 
@@ -38,6 +45,8 @@ open JiggleJam.xcodeproj   # then ⌘R
 
 ## Tests
 
+[![CI](https://github.com/datar-gaurav/jigglejam/actions/workflows/ci.yml/badge.svg)](https://github.com/datar-gaurav/jigglejam/actions/workflows/ci.yml)
+
 ```sh
 xcodebuild -project JiggleJam.xcodeproj -scheme JiggleJam test
 ```
@@ -53,6 +62,12 @@ detectors: jumps, squats, marching, single-knee lifts, tracking gaps and player 
 3. Click **Full Screen**, press **1**–**5** (or click a game) to start, **Esc** to go back to the menu.
 4. Stand 2–3 m back so the camera sees the whole body (the menu tells you when it does).
 
+## Measuring TV delay
+
+Menu → **📏 Measure TV delay**. Point the camera at the TV; the screen flashes and each flash is
+timed until the camera sees it — the full draw → display → camera → tracking loop the player
+feels. Save a result labelled "HDMI", switch to AirPlay, and save another to compare.
+
 ## How it works
 
 | File | Role |
@@ -60,6 +75,8 @@ detectors: jumps, squats, marching, single-knee lifts, tracking gaps and player 
 | `Sources/PoseTypes.swift` | Pose data passed from the camera to games, with a freshness check |
 | `Sources/CameraManager.swift` | Capture session, camera picking, Vision body-pose per frame → hand/foot points |
 | `Sources/CameraPreview.swift` | Mirrored live camera background |
+| `Sources/SetupView.swift` | Per-game setup screen and its checks |
+| `Sources/LatencyTestView.swift` | Screen-to-camera delay measurement |
 | `Sources/GameScene.swift` | Base class for games: pose input, coordinate mapping, speech, confetti |
 | `Sources/BubbleScene.swift` | Bubble Pop |
 | `Sources/FreezeDanceScene.swift` | Freeze Dance: phases, motion/stillness detection (tuning constants at top) |

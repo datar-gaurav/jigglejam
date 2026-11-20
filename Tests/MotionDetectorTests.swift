@@ -2,7 +2,21 @@ import XCTest
 import CoreGraphics
 
 /// Pose replay tests: synthetic players at 30 fps, driven through the real detectors.
+/// Repeatable jitter, so every run sees exactly the same poses.
+struct SeededRNG: RandomNumberGenerator {
+    var state: UInt64
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return state
+    }
+}
+var testRNG = SeededRNG(state: 42)
+
 final class MotionDetectorTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        testRNG = SeededRNG(state: 42)
+    }
 
     // MARK: - Synthetic player
 
@@ -18,7 +32,7 @@ final class MotionDetectorTests: XCTestCase {
         var jitter: CGFloat = 0.004
 
         func body() -> Body {
-            func n() -> CGFloat { .random(in: -jitter...jitter) }
+            func n() -> CGFloat { .random(in: -jitter...jitter, using: &testRNG) }
             let s = scale
             let ankle = feet + lift
             let hip = ankle + 0.24 * s - hipDrop
@@ -196,5 +210,44 @@ final class MotionDetectorTests: XCTestCase {
         XCTAssertFalse(frame.isFresh(at: 100.2 + PoseFrame.freshness))
         XCTAssertFalse(PoseFrame().isFresh(at: 5), "a frame that never arrived is never fresh")
         XCTAssertTrue(frame.withoutInput.bodies.isEmpty)
+    }
+}
+
+extension MotionDetectorTests {
+    /// Small hops (hips rise ~80% of a full jump) miss at first; after three
+    /// near misses the detector eases and the same hops count.
+    func testRepeatedNearMissesWidenTheJumpWindow() {
+        let jumper = JumpDetector()
+        let hopStarts = stride(from: 1.5, to: 9.5, by: 1.0).map { $0 }
+        var easedAt: Double?
+        var jumpsAfterEase = 0
+        replay(10, jumper: jumper) { t in
+            if jumper.easedJustNow { easedAt = t }
+            var p = Player()
+            p.lift = hopStarts.map { jumpLift(t, start: $0, height: 0.045) }.reduce(0, +)
+            return [p.body()]
+        }
+        // Count again, separately, to see hops being accepted once eased.
+        let r = replay(4, jumper: jumper, start: 10) { t in
+            var p = Player()
+            p.lift = [11.0, 12.0, 13.0].map { jumpLift(t, start: $0, height: 0.045) }.reduce(0, +)
+            return [p.body()]
+        }
+        jumpsAfterEase = r.jumps
+        XCTAssertTrue(jumper.eased)
+        XCTAssertNotNil(easedAt)
+        XCTAssertEqual(jumpsAfterEase, 3)
+    }
+
+    func testSquatsDoNotCountAsJumpsEvenWhenEased() {
+        let jumper = JumpDetector()
+        jumper.ease()
+        let r = replay(10, jumper: jumper) { t in
+            var p = Player()
+            let phase = t.truncatingRemainder(dividingBy: 2.5)
+            if t > 1, phase > 0.5, phase < 1.5 { p.hipDrop = 0.1 }
+            return [p.body()]
+        }
+        XCTAssertEqual(r.jumps, 0)
     }
 }

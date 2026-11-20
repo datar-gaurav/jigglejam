@@ -33,6 +33,8 @@ struct PoseFrame {
     var timestamp: Double = 0
     /// `uptime()` when this frame was produced; 0 = never.
     var receivedAt: Double = 0
+    /// Average brightness (0...1) of the middle of the picture; only measured during the latency test.
+    var brightness: Double?
 
     /// Frames older than this are not trusted as live input (camera stalled or disconnected).
     static let freshness: Double = 0.5
@@ -43,6 +45,6 @@ struct PoseFrame {
 
     /// The same frame with all player input removed, for when it can't be trusted.
     var withoutInput: PoseFrame {
-        PoseFrame(imageSize: imageSize, timestamp: timestamp, receivedAt: receivedAt)
+        PoseFrame(imageSize: imageSize, timestamp: timestamp, receivedAt: receivedAt, brightness: brightness)
     }
 }

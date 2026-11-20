@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the newest Xcode on the runner
+        run: |
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build and run tests
+        run: |
+          set -o pipefail
+          xcodebuild -project JiggleJam.xcodeproj -scheme JiggleJam -configuration Debug \
+            -derivedDataPath build -destination 'platform=macOS' test | tee xcodebuild.log | grep -E "error:|warning: .*\.swift|Test Case .* failed|Executed|\*\* (BUILD|TEST)"

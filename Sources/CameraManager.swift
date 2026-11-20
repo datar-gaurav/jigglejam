@@ -34,6 +34,13 @@ final class CameraManager: NSObject, ObservableObject {
     }()
     private let lock = NSLock()
     private var _handTracking = false
+    private var _latencyProbe = false
+
+    /// The TV latency test turns this on to measure picture brightness on every frame.
+    var latencyProbeEnabled: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _latencyProbe }
+        set { lock.lock(); _latencyProbe = newValue; lock.unlock() }
+    }
 
     /// Hand tracking costs extra time per frame, so games turn it on only when they need it.
     var handTrackingEnabled: Bool {
@@ -233,6 +240,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         let hands = wantHands ? (handRequest.results ?? []).compactMap(Self.handCenter(from:)) : []
         recordStats(trackingTime: CACurrentMediaTime() - started, size: size)
         let people = poseRequest.results ?? []
+        let brightness = latencyProbeEnabled ? Self.brightness(of: buffer) : nil
 
         let bodies = people.map(Self.body(from:))
         let next = PoseFrame(
@@ -243,7 +251,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             hands: hands,
             imageSize: size,
             timestamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds,
-            receivedAt: uptime()
+            receivedAt: uptime(),
+            brightness: brightness
         )
         lock.lock(); frame = next; lock.unlock()
 
@@ -258,6 +267,27 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             let count = people.count
             DispatchQueue.main.async { self.peopleCount = count }
         }
+    }
+
+    /// Average brightness of the middle 60% of a BGRA frame, sampled on a coarse grid.
+    private static func brightness(of buffer: CVPixelBuffer) -> Double? {
+        guard CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        let w = CVPixelBufferGetWidth(buffer), h = CVPixelBufferGetHeight(buffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+        var total = 0.0, count = 0.0
+        for gy in 0..<18 {
+            let y = Int(Double(h) * (0.2 + 0.6 * Double(gy) / 17))
+            for gx in 0..<32 {
+                let x = Int(Double(w) * (0.2 + 0.6 * Double(gx) / 31))
+                let p = base + min(y, h - 1) * rowBytes + min(x, w - 1) * 4
+                total += 0.114 * Double(p[0]) + 0.587 * Double(p[1]) + 0.299 * Double(p[2])
+                count += 1
+            }
+        }
+        return total / count / 255
     }
 
     private func recordStats(trackingTime: Double, size: CGSize) {

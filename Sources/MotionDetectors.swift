@@ -68,6 +68,15 @@ final class JumpDetector {
     var feetLift: CGFloat = 0.1       // ankles this far above the ground (torso lengths) = feet left the floor
     var minGap: TimeInterval = 0.35
     var calibrationFrames = 6         // steady frames needed after (re)calibrating before jumps count
+    /// After this many "almost jumps" in a row (hips rose at least halfway), make jumping easier.
+    /// 0 turns easing off.
+    var easeAfterNearMisses = 3
+
+    /// True once jumping was made easier; `easedJustNow` is true only on that frame.
+    private(set) var eased = false
+    private(set) var easedJustNow = false
+    private(set) var nearMisses = 0
+    private var attemptArmed = true
 
     let tracker = PlayerTracker()
 
@@ -90,6 +99,7 @@ final class JumpDetector {
 
     /// Call every game frame. Returns true once, on the frame a jump takes off.
     func update(_ pose: PoseFrame, now: TimeInterval) -> Bool {
+        easedJustNow = false
         newFrame = pose.timestamp != lastTimestamp
         guard newFrame else { return false }
         let gap = lastTimestamp > 0 ? pose.timestamp - lastTimestamp : 0
@@ -137,16 +147,42 @@ final class JumpDetector {
             airborne = true
             airborneSince = now
             lastJump = now
+            nearMisses = 0
+            attemptArmed = false
             return true
         } else {
+            noteNearMiss(rise: rise)
             // Slowly follow the standing height as the player moves around. (Standing up from a
             // squat raises the hips a lot, but the feet stay down, so it isn't mistaken for a jump.)
-            standingHip = standing + (hip - standing) * 0.08
+            // Only follow quickly near standing height: the start of a hop (or a squat) shouldn't
+            // drag the baseline along and shrink the measured rise.
+            let follow: CGFloat = abs(rise) < landingRise ? 0.08 : 0.01
+            standingHip = standing + (hip - standing) * follow
             if let ankle, let ground = groundAnkle, (ankle - ground) / torso < feetLift {
                 groundAnkle = ground + (ankle - ground) * 0.1
             }
         }
         return false
+    }
+
+    /// An attempt that got at least halfway counts once, then re-arms when the hips settle.
+    private func noteNearMiss(rise: CGFloat) {
+        if rise < landingRise {
+            attemptArmed = true
+        } else if attemptArmed, rise > takeoffRise * 0.5 {
+            attemptArmed = false
+            nearMisses += 1
+            if easeAfterNearMisses > 0, !eased, nearMisses >= easeAfterNearMisses { ease() }
+        }
+    }
+
+    /// Wider jump window: smaller hops (and a smaller foot lift) count from now on.
+    func ease() {
+        guard !eased else { return }
+        eased = true
+        easedJustNow = true
+        takeoffRise *= 0.65
+        feetLift *= 0.6
     }
 
     func reset() {

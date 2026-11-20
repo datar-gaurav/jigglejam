@@ -38,6 +38,12 @@ final class FoxTrailScene: GameScene {
     private var celebratingUntil: TimeInterval = 0
     private var fruitCount = 0
 
+    /// Level 1 starts with practice: march first, then one jump, before any crates.
+    private enum Practice { case march, jump, done }
+    private var practice: Practice = .march
+    private let practiceWalkDistance: CGFloat = 1.2
+    private lazy var coachLabel = makeLabel("🚶 March to walk!", size: 0.09)
+
     private var crates: [Crate] = []
     private var fruits: [Fruit] = []
     private var scenery: [Parallax] = []
@@ -78,8 +84,10 @@ final class FoxTrailScene: GameScene {
         world.addChild(jumpHint)
         addChild(fruitLabel)
         addChild(levelLabel)
+        coachLabel.zPosition = 20
+        addChild(coachLabel)
         buildLevel()
-        say("Fox Trail! March your legs to walk, and jump over the boxes!")
+        say("Fox Trail! Let's practice. March your legs to walk!")
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -181,7 +189,7 @@ final class FoxTrailScene: GameScene {
     private func makeCrates() -> [Crate] {
         let count = min(5 + level * 2, 12)
         var result: [Crate] = []
-        var x: CGFloat = 1.6
+        var x: CGFloat = level == 1 ? 4.2 : 1.6 // level 1 leaves room for practice
         for _ in 0..<count {
             let tall = level >= 2 && Int.random(in: 0..<3) == 0
             let h: CGFloat = tall ? 0.2 : .random(in: 0.1...0.14)
@@ -239,6 +247,9 @@ final class FoxTrailScene: GameScene {
         if jumper.newFrame {
             walker.update(player: jumper.player, torso: jumper.torso, frameDT: jumper.frameDT, airborne: jumper.airborne)
         }
+
+        if jumper.easedJustNow { say("Little jumps work too!") }
+        updatePractice(jumped: jumped)
 
         let celebrating = now < celebratingUntil
         if !celebrating {
@@ -305,6 +316,37 @@ final class FoxTrailScene: GameScene {
         }
     }
 
+    private func updatePractice(jumped: Bool) {
+        coachLabel.position = CGPoint(x: size.width / 2, y: H * 0.72)
+        coachLabel.fontSize = H * 0.09
+        switch practice {
+        case .march:
+            if level > 1 { practice = .done; coachLabel.alpha = 0; return }
+            if foxX > practiceWalkDistance {
+                practice = .jump
+                coach("⬆️ Now jump!")
+                say("Great marching! Now give me a big jump!")
+            }
+        case .jump:
+            if jumped {
+                practice = .done
+                coach("🎉 Great jumping!")
+                coachLabel.run(.sequence([.wait(forDuration: 2), .fadeOut(withDuration: 0.5)]))
+                say("Great jumping! Now let's go! Jump over the boxes!")
+            }
+        case .done:
+            break
+        }
+    }
+
+    private func coach(_ text: String) {
+        coachLabel.removeAllActions()
+        coachLabel.alpha = 1
+        coachLabel.text = text
+        coachLabel.setScale(0.5)
+        coachLabel.run(.scale(to: 1, duration: 0.2))
+    }
+
     private func nudges(dt: TimeInterval, pose: PoseFrame) {
         idleTime = walker.pace == 0 && onGround ? idleTime + dt : 0
         let showJump = blockedTime > 0.6
@@ -313,6 +355,9 @@ final class FoxTrailScene: GameScene {
         if blockedTime > 1.2 {
             lastNudge = now
             say(["Jump over the box!", "Big jump!", "Jump, jump!"].randomElement()!)
+        } else if practice == .jump, foxX > practiceWalkDistance + 0.5 {
+            lastNudge = now
+            say(["Jump! Jump!", "Big jump!", "Can you jump like a frog?"].randomElement()!)
         } else if idleTime > 5 {
             lastNudge = now
             say(["March your legs to walk!", "Stomp stomp! Let's walk!", "Walk like a soldier!"].randomElement()!)

@@ -67,14 +67,17 @@ enum Game: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
     @State private var game: Game?
+    @State private var measuringLatency = false
 
     var body: some View {
         ZStack {
-            if let game {
+            if measuringLatency {
+                LatencyTestView(camera: camera) { measuringLatency = false }
+            } else if let game {
                 GameView(camera: camera, game: game) { self.game = nil }
                     .id(game)
             } else {
-                MenuView(camera: camera) { game = $0 }
+                MenuView(camera: camera, onPlay: { game = $0 }, onMeasureLatency: { measuringLatency = true })
             }
         }
         .onAppear { camera.start() }
@@ -85,20 +88,52 @@ struct ContentView: View {
 
 struct GameView: View {
     @ObservedObject var camera: CameraManager
+    let game: Game
     let onExit: () -> Void
     @State private var scene: GameScene
+    @State private var ready = false
     private let showsCamera: Bool
     @State private var showStats = false
     @AppStorage("warnTooClose") private var warnTooClose = true
 
     init(camera: CameraManager, game: Game, onExit: @escaping () -> Void) {
         self.camera = camera
+        self.game = game
         self.onExit = onExit
         _scene = State(initialValue: game.makeScene())
         showsCamera = game.showsCamera
     }
 
     var body: some View {
+        ZStack(alignment: .topLeading) {
+            if ready {
+                playing
+            } else {
+                SetupView(camera: camera, game: game, warnTooClose: warnTooClose) { ready = true }
+            }
+            Button(action: onExit) {
+                Image(systemName: "xmark.circle.fill").font(.system(size: 30))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(0.5))
+            .padding(24)
+            .keyboardShortcut(.cancelAction) // Esc goes back to the menu
+            .help("Back to menu (Esc)")
+        }
+        .onAppear {
+            let camera = camera
+            scene.frameProvider = { camera.latestFrame }
+            camera.handTrackingEnabled = scene.wantsHandTracking
+            scene.distanceWarningEnabled = warnTooClose
+        }
+        .onChange(of: warnTooClose) { _, on in scene.distanceWarningEnabled = on }
+        .onDisappear {
+            scene.tearDown()
+            camera.handTrackingEnabled = false
+        }
+    }
+
+    @ViewBuilder private var playing: some View {
         ZStack(alignment: .topLeading) {
             if showsCamera {
                 CameraPreview(session: camera.session).ignoresSafeArea()
@@ -123,25 +158,6 @@ struct GameView: View {
             Button("") { showStats.toggle() }
                 .keyboardShortcut("d", modifiers: [])
                 .opacity(0)
-            Button(action: onExit) {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 30))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.5))
-            .padding(24)
-            .keyboardShortcut(.cancelAction) // Esc goes back to the menu
-            .help("Back to menu (Esc)")
-        }
-        .onAppear {
-            let camera = camera
-            scene.frameProvider = { camera.latestFrame }
-            camera.handTrackingEnabled = scene.wantsHandTracking
-            scene.distanceWarningEnabled = warnTooClose
-        }
-        .onChange(of: warnTooClose) { _, on in scene.distanceWarningEnabled = on }
-        .onDisappear {
-            scene.tearDown()
-            camera.handTrackingEnabled = false
         }
     }
 }
@@ -151,6 +167,7 @@ struct GameView: View {
 struct MenuView: View {
     @ObservedObject var camera: CameraManager
     let onPlay: (Game) -> Void
+    let onMeasureLatency: () -> Void
     @AppStorage("warnTooClose") private var warnTooClose = true
 
     var body: some View {
@@ -198,6 +215,8 @@ struct MenuView: View {
                         .toggleStyle(.switch)
                         .foregroundStyle(.white)
                     Button("Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                    Button("📏 Measure TV delay", action: onMeasureLatency)
+                        .help("Times how long it takes for a change on screen to reach the player and back")
                 }
 
                 if let notice = camera.cameraNotice {
@@ -266,42 +285,58 @@ struct TrackingWindow: View {
     var body: some View {
         ZStack {
             CameraPreview(session: camera.session)
-            TimelineView(.animation) { _ in
-                Canvas { context, size in
-                    let frame = camera.latestFrame
-                    // Same aspect-fill mapping as the preview layer, with SwiftUI's top-left origin.
-                    let scale = max(size.width / frame.imageSize.width, size.height / frame.imageSize.height)
-                    let w = frame.imageSize.width * scale, h = frame.imageSize.height * scale
-                    func point(_ p: CGPoint) -> CGPoint {
-                        CGPoint(x: (size.width - w) / 2 + p.x * w, y: size.height - ((size.height - h) / 2 + p.y * h))
-                    }
-                    func dot(_ p: CGPoint, _ r: CGFloat, _ color: Color) {
-                        let c = point(p)
-                        context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(color))
-                    }
-
-                    for body in frame.bodies {
-                        for (_, p) in body { dot(p, 4, .yellow) }
-                    }
-                    if frame.hands.count >= 2 {
-                        var line = Path()
-                        line.move(to: point(frame.hands[0]))
-                        line.addLine(to: point(frame.hands[1]))
-                        context.stroke(line, with: .color(.green), lineWidth: 4)
-                    }
-                    for hand in frame.hands { dot(hand, 10, .green) }
-
-                    let label = "✋ \(frame.hands.count)  🧍 \(frame.bodies.count)  \(scene.debugText)"
-                    context.draw(
-                        Text(label).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(.white),
-                        at: CGPoint(x: size.width / 2, y: size.height - 14)
-                    )
-                }
+            TrackingOverlay(camera: camera) { frame in
+                "✋ \(frame.hands.count)  🧍 \(frame.bodies.count)  \(scene.debugText)"
             }
         }
         .frame(width: 400, height: 225)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.7), lineWidth: 2))
         .shadow(radius: 8)
+    }
+}
+
+/// Draws what the trackers see over a `CameraPreview` of the same size.
+/// Green: hands from the hand tracker (joined by a line). Yellow: body joints.
+struct TrackingOverlay: View {
+    let camera: CameraManager
+    var dotScale: CGFloat = 1
+    var label: ((PoseFrame) -> String)?
+
+    var body: some View {
+        TimelineView(.animation) { _ in
+            Canvas { context, size in
+                let frame = camera.latestFrame
+                guard frame.isFresh() else { return }
+                // Same aspect-fill mapping as the preview layer, with SwiftUI's top-left origin.
+                let scale = max(size.width / frame.imageSize.width, size.height / frame.imageSize.height)
+                let w = frame.imageSize.width * scale, h = frame.imageSize.height * scale
+                func point(_ p: CGPoint) -> CGPoint {
+                    CGPoint(x: (size.width - w) / 2 + p.x * w, y: size.height - ((size.height - h) / 2 + p.y * h))
+                }
+                func dot(_ p: CGPoint, _ r: CGFloat, _ color: Color) {
+                    let c = point(p), r = r * dotScale
+                    context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(color))
+                }
+
+                for body in frame.bodies {
+                    for (_, p) in body { dot(p, 4, .yellow) }
+                }
+                if frame.hands.count >= 2 {
+                    var line = Path()
+                    line.move(to: point(frame.hands[0]))
+                    line.addLine(to: point(frame.hands[1]))
+                    context.stroke(line, with: .color(.green), lineWidth: 4 * dotScale)
+                }
+                for hand in frame.hands { dot(hand, 10, .green) }
+
+                if let label {
+                    context.draw(
+                        Text(label(frame)).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(.white),
+                        at: CGPoint(x: size.width / 2, y: size.height - 14)
+                    )
+                }
+            }
+        }
     }
 }
