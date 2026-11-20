@@ -1,0 +1,27 @@
+name: GameCube
+options:
+  bundleIdPrefix: com.gamecube
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  GameCube:
+    type: application
+    platform: macOS
+    sources: [Sources]
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: GameCube
+        LSApplicationCategoryType: public.app-category.kids-games
+        NSCameraUsageDescription: GameCube uses the camera to see your moves so you can play games with your body.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gamecube.app
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: NO
