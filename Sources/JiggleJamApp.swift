@@ -13,16 +13,53 @@ struct JiggleJamApp: App {
     }
 }
 
+enum Game: String, CaseIterable, Identifiable {
+    case bubblePop, freezeDance
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .bubblePop: return "Bubble Pop"
+        case .freezeDance: return "Freeze Dance"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .bubblePop: return "🫧"
+        case .freezeDance: return "🥶"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .bubblePop: return .pink
+        case .freezeDance: return .blue
+        }
+    }
+
+    func makeScene() -> GameScene {
+        let scene: GameScene
+        switch self {
+        case .bubblePop: scene = BubbleScene(size: CGSize(width: 1280, height: 720))
+        case .freezeDance: scene = FreezeDanceScene(size: CGSize(width: 1280, height: 720))
+        }
+        scene.scaleMode = .resizeFill
+        return scene
+    }
+}
+
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
-    @State private var playing = false
+    @State private var game: Game?
 
     var body: some View {
         ZStack {
-            if playing {
-                GameView(camera: camera) { playing = false }
+            if let game {
+                GameView(camera: camera, game: game) { self.game = nil }
+                    .id(game)
             } else {
-                MenuView(camera: camera) { playing = true }
+                MenuView(camera: camera) { game = $0 }
             }
         }
         .onAppear { camera.start() }
@@ -34,12 +71,13 @@ struct ContentView: View {
 struct GameView: View {
     @ObservedObject var camera: CameraManager
     let onExit: () -> Void
+    @State private var scene: GameScene
 
-    @State private var scene: BubbleScene = {
-        let scene = BubbleScene(size: CGSize(width: 1280, height: 720))
-        scene.scaleMode = .resizeFill
-        return scene
-    }()
+    init(camera: CameraManager, game: Game, onExit: @escaping () -> Void) {
+        self.camera = camera
+        self.onExit = onExit
+        _scene = State(initialValue: game.makeScene())
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -58,6 +96,7 @@ struct GameView: View {
             let camera = camera
             scene.frameProvider = { camera.latestFrame }
         }
+        .onDisappear { scene.tearDown() }
     }
 }
 
@@ -65,7 +104,7 @@ struct GameView: View {
 
 struct MenuView: View {
     @ObservedObject var camera: CameraManager
-    let onPlay: () -> Void
+    let onPlay: (Game) -> Void
 
     var body: some View {
         ZStack {
@@ -77,18 +116,22 @@ struct MenuView: View {
                     .font(.system(size: 64, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
 
-                Button(action: onPlay) {
-                    VStack(spacing: 10) {
-                        Text("🫧").font(.system(size: 96))
-                        Text("Bubble Pop").font(.system(size: 36, weight: .bold, design: .rounded))
+                HStack(spacing: 28) {
+                    ForEach(Array(Game.allCases.enumerated()), id: \.element) { index, game in
+                        Button { onPlay(game) } label: {
+                            VStack(spacing: 10) {
+                                Text(game.emoji).font(.system(size: 96))
+                                Text(game.title).font(.system(size: 34, weight: .bold, design: .rounded))
+                            }
+                            .frame(width: 280, height: 220)
+                            .background(RoundedRectangle(cornerRadius: 32).fill(game.color.gradient))
+                            .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [])
+                        .help("Press \(index + 1)")
                     }
-                    .padding(.horizontal, 48)
-                    .padding(.vertical, 32)
-                    .background(RoundedRectangle(cornerRadius: 32).fill(Color.pink.gradient))
-                    .foregroundStyle(.white)
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.defaultAction)
 
                 status
 

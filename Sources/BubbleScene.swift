@@ -12,9 +12,7 @@ final class Bubble: SKShapeNode {
 
 /// Bubble Pop: bubbles float up, the child pops them with hands or feet.
 /// There's no way to lose: every pop is a win, and there's a cheer every 10.
-final class BubbleScene: SKScene {
-    var frameProvider: (() -> PoseFrame)?
-
+final class BubbleScene: GameScene {
     private var markers: [SKShapeNode] = []
     private var markerKinds: [Popper.Kind] = []
     private var bubbles: [Bubble] = []
@@ -24,9 +22,7 @@ final class BubbleScene: SKScene {
     private var lastUpdate: TimeInterval = 0
     private var spawnTimer: TimeInterval = 0.5
     private var noBodyTime: TimeInterval = 0
-    private let speech = AVSpeechSynthesizer()
     private var sounds: [NSSound] = []
-    private let colors: [NSColor] = [.systemPink, .systemTeal, .systemYellow, .systemGreen, .systemPurple, .systemOrange, .systemBlue]
     private let maxBubbles = 9
 
     private var handRadius: CGFloat { size.height * 0.055 }
@@ -69,7 +65,7 @@ final class BubbleScene: SKScene {
     override func update(_ currentTime: TimeInterval) {
         let dt = lastUpdate == 0 ? 1.0 / 60 : min(currentTime - lastUpdate, 1.0 / 20)
         lastUpdate = currentTime
-        let pose = frameProvider?() ?? PoseFrame()
+        let pose = currentPose
 
         updateMarkers(pose)
         updateHint(pose, dt: dt)
@@ -81,13 +77,6 @@ final class BubbleScene: SKScene {
         }
         moveBubbles(dt: CGFloat(dt))
         checkPops()
-    }
-
-    /// Maps a normalized camera point to the scene, matching the preview's aspect-fill crop.
-    private func scenePoint(_ p: CGPoint, imageSize: CGSize) -> CGPoint {
-        let scale = max(size.width / imageSize.width, size.height / imageSize.height)
-        let w = imageSize.width * scale, h = imageSize.height * scale
-        return CGPoint(x: (size.width - w) / 2 + p.x * w, y: (size.height - h) / 2 + p.y * h)
     }
 
     // MARK: - Hands & feet
@@ -139,7 +128,7 @@ final class BubbleScene: SKScene {
 
     private func spawnBubble() {
         let r = size.height * .random(in: 0.065...0.1)
-        let color = colors.randomElement()!
+        let color = palette.randomElement()!
         let b = Bubble()
         b.radius = r
         b.color = color
@@ -233,20 +222,7 @@ final class BubbleScene: SKScene {
     private func celebrate() {
         let cheers = ["Wow! \(score) bubbles!", "Amazing! \(score)!", "You're a super popper!", "Great job! \(score) bubbles!"]
         say(cheers.randomElement()!)
-        for _ in 0..<50 {
-            let piece = SKShapeNode(rectOf: CGSize(width: size.height * 0.015, height: size.height * 0.03), cornerRadius: 2)
-            piece.fillColor = colors.randomElement()!
-            piece.strokeColor = .clear
-            piece.position = CGPoint(x: .random(in: 0...size.width), y: size.height + 20)
-            piece.zPosition = 8
-            addChild(piece)
-            let fall = TimeInterval.random(in: 1.8...3.2)
-            piece.run(.sequence([
-                .group([.moveBy(x: .random(in: -80...80), y: -size.height - 60, duration: fall),
-                        .rotate(byAngle: .random(in: -8...8), duration: fall)]),
-                .removeFromParent()
-            ]))
-        }
+        confetti()
     }
 
     private func playPop() {
@@ -255,13 +231,5 @@ final class BubbleScene: SKScene {
         sounds.append(sound)
         if sounds.count > 6 { sounds.removeFirst() }
         sound.play()
-    }
-
-    private func say(_ text: String) {
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = 0.45
-        utterance.pitchMultiplier = 1.25
-        speech.stopSpeaking(at: .word)
-        speech.speak(utterance)
     }
 }

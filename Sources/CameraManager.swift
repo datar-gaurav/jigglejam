@@ -10,11 +10,19 @@ struct Popper {
     var point: CGPoint
 }
 
+typealias Joint = VNHumanBodyPoseObservation.JointName
+
+/// All confidently-tracked joints of one person (normalized, mirrored, origin bottom-left).
+typealias Body = [Joint: CGPoint]
+
 /// The latest body-tracking result, read by games every frame.
 struct PoseFrame {
     var poppers: [Popper] = []
+    var bodies: [Body] = []
     var peopleCount = 0
     var imageSize = CGSize(width: 1280, height: 720)
+    /// Camera timestamp in seconds; changes only when a new camera frame was analysed.
+    var timestamp: Double = 0
 }
 
 extension Notification.Name {
@@ -159,7 +167,14 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         try? handler.perform([poseRequest])
         let people = poseRequest.results ?? []
 
-        let next = PoseFrame(poppers: people.flatMap(Self.poppers(from:)), peopleCount: people.count, imageSize: size)
+        let bodies = people.map(Self.body(from:))
+        let next = PoseFrame(
+            poppers: bodies.flatMap(Self.poppers(from:)),
+            bodies: bodies,
+            peopleCount: people.count,
+            imageSize: size,
+            timestamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        )
         lock.lock(); frame = next; lock.unlock()
 
         if people.count != lastPeopleCount {
@@ -169,20 +184,20 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
-    private typealias Joint = VNHumanBodyPoseObservation.JointName
-
-    private static func poppers(from body: VNHumanBodyPoseObservation) -> [Popper] {
-        guard let points = try? body.recognizedPoints(.all) else { return [] }
-
-        func point(_ joint: Joint) -> CGPoint? {
-            guard let p = points[joint], p.confidence > 0.25 else { return nil }
-            return CGPoint(x: 1 - p.location.x, y: p.location.y) // mirror so it feels like a mirror
+    private static func body(from observation: VNHumanBodyPoseObservation) -> Body {
+        guard let points = try? observation.recognizedPoints(.all) else { return [:] }
+        var body: Body = [:]
+        for (joint, p) in points where p.confidence > 0.25 {
+            body[joint] = CGPoint(x: 1 - p.location.x, y: p.location.y) // mirror so it feels like a mirror
         }
+        return body
+    }
 
+    private static func poppers(from body: Body) -> [Popper] {
         /// Vision tracks wrists, not palms: nudge past the wrist along the forearm to reach the hand.
         func extend(_ tip: Joint, from base: Joint, by amount: CGFloat) -> CGPoint? {
-            guard let t = point(tip) else { return nil }
-            guard let b = point(base) else { return t }
+            guard let t = body[tip] else { return nil }
+            guard let b = body[base] else { return t }
             return CGPoint(x: t.x + (t.x - b.x) * amount, y: t.y + (t.y - b.y) * amount)
         }
 
@@ -192,7 +207,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             if let p = extend(wrist, from: elbow, by: 0.3) { result.append(Popper(kind: .hand, point: p)) }
         }
         for ankle in [Joint.leftAnkle, .rightAnkle] {
-            if let p = point(ankle) { result.append(Popper(kind: .foot, point: p)) }
+            if let p = body[ankle] { result.append(Popper(kind: .foot, point: p)) }
         }
         return result
     }

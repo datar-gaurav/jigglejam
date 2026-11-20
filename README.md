@@ -8,6 +8,8 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
 
 - **Bubble Pop** — bubbles float up; pop them with hands (white rings) or feet (yellow rings).
   No way to lose; a spoken cheer and confetti every 10 pops.
+- **Freeze Dance** — built-in music plays and sparkles fly off the hands while dancing; when the
+  music stops, freeze! Holding still earns a star. A wobbly freeze is just "let's try again".
 
 ## Run it
 
@@ -23,7 +25,7 @@ open JiggleJam.xcodeproj   # then ⌘R
 1. **Camera:** pick it in the menu. An iPhone appears automatically as a Continuity Camera
    (same Apple ID, Wi‑Fi + Bluetooth on). Mount it in landscape below/above the TV.
 2. **TV:** Control Center → Screen Mirroring → your Apple TV / AirPlay TV.
-3. Click **Full Screen**, press **Return** to start, **Esc** to go back to the menu.
+3. Click **Full Screen**, press **1** or **2** (or click a game) to start, **Esc** to go back to the menu.
 4. Stand 2–3 m back so the camera sees the whole body (the menu tells you when it does).
 
 ## How it works
@@ -32,5 +34,8 @@ open JiggleJam.xcodeproj   # then ⌘R
 | --- | --- |
 | `Sources/CameraManager.swift` | Capture session, camera picking, Vision body-pose per frame → hand/foot points |
 | `Sources/CameraPreview.swift` | Mirrored live camera background |
-| `Sources/BubbleScene.swift` | SpriteKit game: spawning, collisions, effects, sound, speech |
+| `Sources/GameScene.swift` | Base class for games: pose input, coordinate mapping, speech, confetti |
+| `Sources/BubbleScene.swift` | Bubble Pop |
+| `Sources/FreezeDanceScene.swift` | Freeze Dance: phases, motion/stillness detection (tuning constants at top) |
+| `Sources/DanceMusic.swift` | Tiny synthesized chiptune band, so no audio files are needed |
 | `Sources/JiggleJamApp.swift` | App, parent menu, game screen |
