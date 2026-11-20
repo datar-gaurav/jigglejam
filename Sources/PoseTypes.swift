@@ -35,6 +35,8 @@ struct PoseFrame {
     var receivedAt: Double = 0
     /// Average brightness (0...1) of the middle of the picture; only measured during the latency test.
     var brightness: Double?
+    /// Set on the empty stand-in for a stale frame: input was lost, detectors must drop what they had.
+    var isStale = false
 
     /// Frames older than this are not trusted as live input (camera stalled or disconnected).
     static let freshness: Double = 0.5
@@ -45,6 +47,11 @@ struct PoseFrame {
 
     /// The same frame with all player input removed, for when it can't be trusted.
     var withoutInput: PoseFrame {
-        PoseFrame(imageSize: imageSize, timestamp: timestamp, receivedAt: receivedAt, brightness: brightness)
+        PoseFrame(imageSize: imageSize, timestamp: timestamp, receivedAt: receivedAt, brightness: brightness, isStale: true)
+    }
+
+    /// What games should see right now: this frame while it's fresh, an empty stale frame after.
+    func gated(at now: Double = uptime()) -> PoseFrame {
+        isFresh(at: now) ? self : withoutInput
     }
 }

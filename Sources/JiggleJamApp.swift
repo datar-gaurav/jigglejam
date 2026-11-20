@@ -210,13 +210,13 @@ struct MenuView: View {
                     }
                     .frame(width: 340)
 
-                    Button("Refresh") { camera.refreshDevices() }
+                    Button("Refresh") { camera.refresh() }
                     Toggle("Warn when too close", isOn: $warnTooClose)
                         .toggleStyle(.switch)
                         .foregroundStyle(.white)
                     Button("Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
-                    Button("📏 Measure TV delay", action: onMeasureLatency)
-                        .help("Times how long it takes for a change on screen to reach the player and back")
+                    Button("📏 Display delay test", action: onMeasureLatency)
+                        .help("Display-to-camera loopback: compare HDMI and AirPlay")
                 }
 
                 if let notice = camera.cameraNotice {
@@ -252,9 +252,15 @@ struct MenuView: View {
         case .denied, .restricted:
             VStack(spacing: 8) {
                 Text("Camera access is off.").font(.title2.bold())
-                Button("Open Privacy Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!)
+                HStack {
+                    Button("Open Privacy Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!)
+                    }
+                    Button("I've turned it on") { camera.refresh() }
                 }
+                Text("Turn on Jiggle Jam under Camera, then come back. If macOS asks to quit and reopen, do that.")
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.75))
             }
             .foregroundStyle(.white)
         default:

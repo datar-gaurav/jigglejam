@@ -100,6 +100,13 @@ final class JumpDetector {
     /// Call every game frame. Returns true once, on the frame a jump takes off.
     func update(_ pose: PoseFrame, now: TimeInterval) -> Bool {
         easedJustNow = false
+        if pose.isStale {
+            // Camera stalled: forget the player now; recalibrate when frames come back.
+            newFrame = false
+            tracker.reset()
+            recalibrate()
+            return false
+        }
         newFrame = pose.timestamp != lastTimestamp
         guard newFrame else { return false }
         let gap = lastTimestamp > 0 ? pose.timestamp - lastTimestamp : 0
@@ -274,5 +281,65 @@ final class WalkDetector {
         if let l = body[.leftKnee], let r = body[.rightKnee] { return l.y - r.y }
         if let l = body[.leftAnkle], let r = body[.rightAnkle] { return l.y - r.y }
         return nil
+    }
+}
+
+/// Walking and jumping input for a game, from one player. Stale poses (camera stalled) clear
+/// movement immediately, so nothing keeps walking on old data while the game waits to pause.
+final class Locomotion {
+    let jumper = JumpDetector()
+    let walker = WalkDetector()
+
+    var pace: CGFloat { walker.pace }
+
+    /// Call every game frame with the gated pose. Returns true on the frame a jump takes off.
+    func update(_ pose: PoseFrame, now: TimeInterval) -> Bool {
+        if pose.isStale {
+            _ = jumper.update(pose, now: now)
+            walker.reset()
+            return false
+        }
+        let jumped = jumper.update(pose, now: now)
+        if jumper.newFrame {
+            walker.update(player: jumper.player, torso: jumper.torso, frameDT: jumper.frameDT, airborne: jumper.airborne)
+        }
+        return jumped
+    }
+
+    func reset() {
+        jumper.reset()
+        walker.reset()
+    }
+}
+
+/// Judges one Freeze Dance freeze from fresh motion samples only. If too little of the freeze was
+/// actually seen (tracking dropped out), the verdict is "not enough seen" so the game replays it
+/// instead of awarding or withholding a star on a guess.
+struct FreezeJudge {
+    var stillThreshold: CGFloat = 0.45   // motion below this counts as frozen
+    var successShare = 0.7               // share of observed time that must be still
+    var minCoverage = 0.6                // share of the judged window that must be observed
+    var maxSampleDuration = 0.1          // one sample never vouches for more than this long
+
+    private(set) var observed: Double = 0
+    private(set) var still: Double = 0
+
+    enum Verdict: Equatable { case froze, wiggly, notEnoughSeen }
+
+    mutating func reset() { observed = 0; still = 0 }
+
+    /// Adds one fresh camera sample. Returns whether the player was still in it.
+    @discardableResult
+    mutating func addSample(motion: CGFloat, duration: Double) -> Bool {
+        let d = min(max(duration, 0), maxSampleDuration)
+        observed += d
+        let isStill = motion < stillThreshold
+        if isStill { still += d }
+        return isStill
+    }
+
+    func verdict(judgedWindow: Double) -> Verdict {
+        guard observed >= judgedWindow * minCoverage, observed > 0 else { return .notEnoughSeen }
+        return still / observed >= successShare ? .froze : .wiggly
     }
 }

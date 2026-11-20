@@ -1,10 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// Measures the whole loop a player experiences: the app draws a change, the display (Mac screen,
-/// HDMI TV or AirPlay TV) shows it, the camera sees it, and tracking processes the frame.
-/// Point the camera at the screen; the screen flips black/white and each flip is timed until the
-/// camera reports the new brightness. Run once over HDMI and once over AirPlay to compare.
+/// Display-to-camera loopback: the app flips the screen black/white, the display (Mac screen,
+/// HDMI TV or AirPlay TV) shows it, the camera sees it, and the frame comes out of the tracking
+/// pipeline. Good for comparing HDMI and AirPlay. It does NOT include gesture recognition,
+/// steering smoothing or the game's next render, so the delay a player feels is somewhat longer;
+/// measure that by filming a hand movement and the on-TV response in one slow-motion clip.
 final class LatencyProbe: ObservableObject {
     struct Run: Identifiable {
         let id = UUID()
@@ -105,8 +106,8 @@ struct LatencyTestView: View {
             (probe.white ? Color.white : Color.black).ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("📏 TV delay test").font(.title.bold())
-                Text("Point the camera at the screen you play on (the TV), so the screen fills most of the camera picture. The screen flashes; each flash is timed until the camera sees it.")
+                Text("📏 Display delay test").font(.title.bold())
+                Text("Display-to-camera loopback. Point the camera at the screen you play on (the TV) so it fills most of the picture. The screen flashes, and each flash is timed until the camera sees it.")
                     .fixedSize(horizontal: false, vertical: true)
                 Text(probe.seesFlashes ? "✅ Camera sees the flashes" : "⏳ Camera can't see the flashes yet")
                     .font(.headline)
@@ -129,7 +130,7 @@ struct LatencyTestView: View {
                 ForEach(probe.runs) { run in
                     Text(String(format: "• %@: %.0f ms (%d flashes)", run.label, run.median * 1000, run.samples))
                 }
-                Text("Includes camera capture, tracking and display time — the same delay the player feels. Lower is better; under ~150 ms feels instant to kids.")
+                Text("Includes drawing, the display, camera capture and pose tracking. It leaves out gesture recognition, smoothing and the game's next frame, so the delay a player feels is a bit longer. Use it to compare HDMI and AirPlay. To measure what the player feels, film a hand movement and the TV's response in one slow-motion clip and count the frames between them.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

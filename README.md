@@ -32,7 +32,7 @@ If a player gets so close that their feet leave the frame, the game pauses with 
 
 If nobody can be seen for a moment, or the camera stops sending frames, the game pauses on
 "👀 Looking for you…" and picks up again with "There you are!" once the player is back. Stale
-camera frames are never used as input.
+camera frames are never used as input: movement stops the moment the picture goes stale.
 
 ## Run it
 
@@ -62,11 +62,15 @@ detectors: jumps, squats, marching, single-knee lifts, tracking gaps and player 
 3. Click **Full Screen**, press **1**–**5** (or click a game) to start, **Esc** to go back to the menu.
 4. Stand 2–3 m back so the camera sees the whole body (the menu tells you when it does).
 
-## Measuring TV delay
+## Display delay test
 
-Menu → **📏 Measure TV delay**. Point the camera at the TV; the screen flashes and each flash is
-timed until the camera sees it — the full draw → display → camera → tracking loop the player
-feels. Save a result labelled "HDMI", switch to AirPlay, and save another to compare.
+Menu → **📏 Display delay test** is a *display-to-camera loopback*. Point the camera at the TV and
+the screen flashes. Each flash is timed until the camera sees it: drawing, display, capture and
+pose tracking. Save a result labelled "HDMI", switch to AirPlay, and save another to compare.
+
+It leaves out gesture recognition, steering smoothing and the game's next frame, so the delay a
+player feels is somewhat longer. To measure that, film a hand movement and the TV's response in
+one slow-motion clip, then count the frames between them.
 
 ## How it works
 

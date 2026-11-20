@@ -22,8 +22,9 @@ final class FoxTrailScene: GameScene {
     }
     private struct Parallax { let node: SKNode; let x: CGFloat; let factor: CGFloat }
 
-    private let jumper = JumpDetector()
-    private let walker = WalkDetector()
+    private let moves = Locomotion()
+    private var jumper: JumpDetector { moves.jumper }
+    private var walker: WalkDetector { moves.walker }
 
     private var now: TimeInterval = 0
     private var level = 1
@@ -66,8 +67,7 @@ final class FoxTrailScene: GameScene {
     // MARK: - Setup
 
     override func trackingDidResume() {
-        jumper.reset()
-        walker.reset()
+        moves.reset()
         walkSpeed = 0
     }
 
@@ -243,10 +243,7 @@ final class FoxTrailScene: GameScene {
         now += dt
         let dt = CGFloat(dt)
 
-        let jumped = jumper.update(pose, now: now)
-        if jumper.newFrame {
-            walker.update(player: jumper.player, torso: jumper.torso, frameDT: jumper.frameDT, airborne: jumper.airborne)
-        }
+        let jumped = moves.update(pose, now: now) // stale poses stop walking immediately
 
         if jumper.easedJustNow { say("Little jumps work too!") }
         updatePractice(jumped: jumped)

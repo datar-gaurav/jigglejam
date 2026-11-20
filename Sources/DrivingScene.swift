@@ -241,6 +241,13 @@ final class DrivingScene: GameScene {
         now += dt
         let dt = CGFloat(dt)
 
+        if pose.isStale {
+            // Camera stalled: stop trusting the last wheel reading straight away.
+            lastReading = nil
+            lastReadingTime = 0
+            lastHandTrackerTime = -10
+            showHands(nil)
+        }
         // Steering: read the camera only on new frames, filter, then ease toward it every frame.
         if pose.timestamp != lastFrameTimestamp {
             let gap = lastFrameTimestamp > 0 ? pose.timestamp - lastFrameTimestamp : 0

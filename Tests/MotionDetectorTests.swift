@@ -251,3 +251,112 @@ extension MotionDetectorTests {
         XCTAssertEqual(r.jumps, 0)
     }
 }
+
+// MARK: - Tracking loss (game-loop level)
+
+extension MotionDetectorTests {
+    /// Review finding: during a camera stall Fox Trail kept walking at pace 0.85 for 1.4 s, because
+    /// the stale stand-in frame kept the old timestamp. This drives `Locomotion` exactly like the
+    /// game loop does: 60 updates per second, each with the latest camera frame gated by freshness.
+    func testCameraStallStopsWalkingAsSoonAsTheFrameIsStale() {
+        let moves = Locomotion()
+        var latest = PoseFrame()
+        var staleSince: Double?
+        var pacesWhileStale: [CGFloat] = []
+        var paceBeforeStall: CGFloat = 0
+
+        var t = 0.0
+        var nextCameraFrame = 0.0
+        while t < 6 {
+            let stalled = t >= 3 && t < 5           // camera sends nothing from 3 s to 5 s
+            if !stalled, t >= nextCameraFrame {
+                let s = CGFloat(sin(t * 2 * .pi))
+                var p = Player()
+                p.leftKnee = max(s, 0) * 0.07
+                p.rightKnee = max(-s, 0) * 0.07
+                latest = PoseFrame(bodies: [p.body()], timestamp: 1 + t, receivedAt: 1 + t)
+                nextCameraFrame += 1.0 / 30
+            }
+            let gated = latest.gated(at: 1 + t)
+            _ = moves.update(gated, now: t)
+            if t > 2.8, t < 3 { paceBeforeStall = max(paceBeforeStall, moves.pace) }
+            if gated.isStale {
+                staleSince = staleSince ?? t
+                pacesWhileStale.append(moves.pace)
+            }
+            t += 1.0 / 60
+        }
+
+        XCTAssertGreaterThan(paceBeforeStall, 0.6, "should be walking before the stall")
+        XCTAssertNotNil(staleSince)
+        XCTAssertLessThanOrEqual(staleSince! - 3, PoseFrame.freshness + 0.05, "frame goes stale within the freshness window")
+        XCTAssertEqual(pacesWhileStale.max(), 0, "no walking at all once the frame is stale")
+    }
+
+    func testWalkingResumesAfterAStall() {
+        let moves = Locomotion()
+        var paces: [CGFloat] = []
+        var t = 0.0
+        while t < 7 {
+            let frame: PoseFrame
+            if t >= 2 && t < 3 {
+                frame = PoseFrame(timestamp: 1 + 1.99, receivedAt: 1 + 1.99).gated(at: 1 + t)
+            } else {
+                let s = CGFloat(sin(t * 2 * .pi))
+                var p = Player()
+                p.leftKnee = max(s, 0) * 0.07
+                p.rightKnee = max(-s, 0) * 0.07
+                frame = PoseFrame(bodies: [p.body()], timestamp: 1 + t, receivedAt: 1 + t)
+            }
+            _ = moves.update(frame, now: t)
+            paces.append(moves.pace)
+            t += 1.0 / 30
+        }
+        XCTAssertGreaterThan(average(paces.suffix(60)), 0.6, "walks again once frames return")
+    }
+
+    func testStaleFramesNeverCountAsJumps() {
+        let moves = Locomotion()
+        var jumps = 0
+        var t = 0.0
+        while t < 4 {
+            var p = Player()
+            p.lift = jumpLift(t, start: 2.5, height: 0.12)
+            // Camera froze on a mid-jump frame at 2.6 s: games keep receiving that same frame.
+            let stamp = t < 2.6 ? t : 2.6
+            let frame = PoseFrame(bodies: [p.body()], timestamp: 1 + stamp, receivedAt: 1 + stamp).gated(at: 1 + t)
+            if moves.update(frame, now: t) { jumps += 1 }
+            t += 1.0 / 60
+        }
+        XCTAssertLessThanOrEqual(jumps, 1)
+    }
+}
+
+// MARK: - Freeze Dance judging
+
+extension MotionDetectorTests {
+    func testFreezeJudgeAwardsAStillFreeze() {
+        var judge = FreezeJudge()
+        for _ in 0..<80 { judge.addSample(motion: 0.1, duration: 1.0 / 30) }   // 2.7 s of 2.7 s, still
+        XCTAssertEqual(judge.verdict(judgedWindow: 2.7), .froze)
+    }
+
+    func testFreezeJudgeSpotsWiggles() {
+        var judge = FreezeJudge()
+        for i in 0..<80 { judge.addSample(motion: i % 2 == 0 ? 1.0 : 0.1, duration: 1.0 / 30) }
+        XCTAssertEqual(judge.verdict(judgedWindow: 2.7), .wiggly)
+    }
+
+    /// Review finding: a star could be awarded after seeing only a fraction of the freeze.
+    func testFreezeJudgeWontScoreWhatItBarelySaw() {
+        var judge = FreezeJudge()
+        for _ in 0..<15 { judge.addSample(motion: 0.1, duration: 1.0 / 30) }   // only 0.5 s seen
+        XCTAssertEqual(judge.verdict(judgedWindow: 2.7), .notEnoughSeen)
+    }
+
+    func testOneSampleAfterAGapDoesNotVouchForTheGap() {
+        var judge = FreezeJudge()
+        judge.addSample(motion: 0.1, duration: 2.5)   // first frame after a long dropout
+        XCTAssertEqual(judge.verdict(judgedWindow: 2.7), .notEnoughSeen)
+    }
+}

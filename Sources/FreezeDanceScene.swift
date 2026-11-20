@@ -15,7 +15,8 @@ final class FreezeDanceScene: GameScene {
     private let stillThreshold: CGFloat = 0.45   // below this counts as frozen
     private let reactionGrace: TimeInterval = 0.8 // time to stop after the music stops
     private let freezeLength: TimeInterval = 3.5
-    private let freezeSuccessShare = 0.7          // share of judged time that must be still
+    private var judge = FreezeJudge()             // scoring tuning lives in FreezeJudge
+    private var freezeReplays = 0
 
     private let music = DanceMusic()
     private var phase: Phase = .intro(until: 0)
@@ -24,8 +25,6 @@ final class FreezeDanceScene: GameScene {
     private var motion: CGFloat = 0
     private var previousBodies: [Body] = []
     private var previousTimestamp: Double = 0
-    private var judgedTime: TimeInterval = 0
-    private var stillTime: TimeInterval = 0
     private var lowMotionTime: TimeInterval = 0
     private var lastNudge: TimeInterval = 0
     private var lastSparkle: TimeInterval = 0
@@ -91,7 +90,7 @@ final class FreezeDanceScene: GameScene {
         now += dt
         if case .intro(until: 0) = phase { startIntro() }
 
-        updateMotion(pose)
+        let sample = updateMotion(pose) // duration of a fresh motion sample this frame, if any
         let someone = pose.peopleCount > 0
         hintLabel.alpha += ((someone ? 0 : 1) - hintLabel.alpha) * 0.1
 
@@ -110,10 +109,8 @@ final class FreezeDanceScene: GameScene {
             if now >= until, someone { startFreeze() }
 
         case .freezing(let start, let until):
-            if now - start >= reactionGrace, someone {
-                judgedTime += dt
-                let still = motion < stillThreshold
-                if still { stillTime += dt }
+            if now - start >= reactionGrace, let sample {
+                let still = judge.addSample(motion: motion, duration: sample)
                 statusLabel.text = still ? "🧊 So still!" : "😄 Wiggly!"
                 statusLabel.fontColor = still ? .white : .systemYellow
             }
@@ -143,12 +140,12 @@ final class FreezeDanceScene: GameScene {
         bigLabel.run(.repeatForever(.sequence([.scale(to: 1.1, duration: 0.24), .scale(to: 1, duration: 0.24)])), withKey: "bounce")
     }
 
-    private func startFreeze() {
+    private func startFreeze(replay: Bool = false) {
         phase = .freezing(start: now, until: now + freezeLength)
-        judgedTime = 0
-        stillTime = 0
+        judge.reset()
+        if !replay { freezeReplays = 0 }
         music.stop()
-        say("Freeze!")
+        say(replay ? "I couldn't see you! Freeze again!" : "Freeze!")
         bigLabel.removeAction(forKey: "bounce")
         show("🥶 FREEZE!")
         statusLabel.text = ""
@@ -157,9 +154,19 @@ final class FreezeDanceScene: GameScene {
     }
 
     private func finishFreeze() {
+        let verdict = judge.verdict(judgedWindow: freezeLength - reactionGrace)
+        if verdict == .notEnoughSeen {
+            // Too little of the freeze was actually seen to judge it fairly: replay it (twice at most).
+            if freezeReplays < 2 {
+                freezeReplays += 1
+                startFreeze(replay: true)
+            } else {
+                startDancing()
+            }
+            return
+        }
         phase = .result(until: now + 2.2)
-        let froze = judgedTime > 0 && stillTime / judgedTime >= freezeSuccessShare
-        if froze {
+        if verdict == .froze {
             stars += 1
             scoreLabel.text = "⭐️ \(stars)"
             scoreLabel.run(.sequence([.scale(to: 1.3, duration: 0.1), .scale(to: 1, duration: 0.2)]))
@@ -184,12 +191,21 @@ final class FreezeDanceScene: GameScene {
     // MARK: - Motion
 
     /// Average speed of every joint tracked in both frames, for the wiggliest person.
-    private func updateMotion(_ pose: PoseFrame) {
-        guard pose.timestamp != previousTimestamp else { return } // no new camera frame yet
+    /// Returns the duration covered by a fresh motion sample, or nil when there was none
+    /// (no new camera frame, stale input, or nobody matched to the previous frame).
+    @discardableResult
+    private func updateMotion(_ pose: PoseFrame) -> Double? {
+        if pose.isStale {
+            previousBodies = []
+            previousTimestamp = 0
+            return nil
+        }
+        guard pose.timestamp != previousTimestamp else { return nil } // no new camera frame yet
         let frameDT = pose.timestamp - previousTimestamp
         defer { previousBodies = pose.bodies; previousTimestamp = pose.timestamp }
-        guard previousTimestamp > 0, frameDT > 0, frameDT < 0.5 else { return }
+        guard previousTimestamp > 0, frameDT > 0, frameDT < 0.5 else { return nil }
 
+        var matched = false
         var fastest: CGFloat = 0
         for body in pose.bodies {
             guard let previous = nearest(to: body, in: previousBodies) else { continue }
@@ -199,9 +215,14 @@ final class FreezeDanceScene: GameScene {
                 total += hypot(p.x - q.x, p.y - q.y)
                 count += 1
             }
-            if count >= 4 { fastest = max(fastest, total / count / CGFloat(frameDT)) }
+            if count >= 4 {
+                matched = true
+                fastest = max(fastest, total / count / CGFloat(frameDT))
+            }
         }
+        guard matched else { return nil }
         motion += (fastest - motion) * 0.35
+        return frameDT
     }
 
     private func center(_ body: Body) -> CGPoint? {

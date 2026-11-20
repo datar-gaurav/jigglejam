@@ -54,8 +54,8 @@ class GameScene: SKScene {
         clock += dt
 
         let raw = currentPose
-        let fresh = raw.isFresh()
-        let pose = fresh ? raw : raw.withoutInput
+        let pose = raw.gated()
+        let fresh = !pose.isStale
         updatePause(pose, fresh: fresh, dt: dt)
         if pauseReason == nil { tick(dt: dt, pose: pose) }
     }

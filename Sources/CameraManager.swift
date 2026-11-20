@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Vision
 import Combine
 
@@ -69,6 +70,10 @@ final class CameraManager: NSObject, ObservableObject {
                 self?.refreshDevices()
             })
         }
+        // Coming back from System Settings: camera access may have just been granted.
+        observers.append(nc.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.recheckAuthorization()
+        })
     }
 
     func start() {
@@ -110,6 +115,21 @@ final class CameraManager: NSObject, ObservableObject {
                 NotificationCenter.default.post(name: .cameraDidSwitch, object: nil)
             }
         }
+    }
+
+    /// Picks up a permission change made in System Settings and starts the camera if access
+    /// was just granted. Called when the app becomes active and from the menu's Refresh button.
+    func recheckAuthorization() {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        if status != authorization { authorization = status }
+        guard !configured else { return }
+        if status == .authorized || status == .notDetermined { start() }
+    }
+
+    /// The menu's Refresh button: recheck permission, then look for cameras again.
+    func refresh() {
+        recheckAuthorization()
+        refreshDevices()
     }
 
     // MARK: - Devices
