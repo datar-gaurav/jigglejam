@@ -1,6 +1,7 @@
 import SwiftUI
 import SpriteKit
 import AVFoundation
+import UniformTypeIdentifiers
 
 @main
 struct JiggleJamApp: App {
@@ -8,66 +9,19 @@ struct JiggleJamApp: App {
         WindowGroup {
             ContentView()
                 .frame(minWidth: 1100, minHeight: 620)
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"]) // open .jigglegame files in this window
         }
         .windowStyle(.hiddenTitleBar)
-    }
-}
-
-enum Game: String, CaseIterable, Identifiable {
-    case bubblePop, freezeDance, rocketJump, driving, foxTrail
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .bubblePop: return "Bubble Pop"
-        case .freezeDance: return "Freeze Dance"
-        case .rocketJump: return "Rocket Jump"
-        case .driving: return "Vroom Vroom"
-        case .foxTrail: return "Fox Trail"
-        }
-    }
-
-    var emoji: String {
-        switch self {
-        case .bubblePop: return "🫧"
-        case .freezeDance: return "🥶"
-        case .rocketJump: return "🚀"
-        case .driving: return "🚗"
-        case .foxTrail: return "🦊"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .bubblePop: return .pink
-        case .freezeDance: return .blue
-        case .rocketJump: return .orange
-        case .driving: return .green
-        case .foxTrail: return .purple
-        }
-    }
-
-    /// These games draw their own world; the camera still runs for tracking, shown in a small window.
-    var showsCamera: Bool { self != .driving && self != .foxTrail }
-
-    func makeScene() -> GameScene {
-        let scene: GameScene
-        switch self {
-        case .bubblePop: scene = BubbleScene(size: CGSize(width: 1280, height: 720))
-        case .freezeDance: scene = FreezeDanceScene(size: CGSize(width: 1280, height: 720))
-        case .rocketJump: scene = RocketJumpScene(size: CGSize(width: 1280, height: 720))
-        case .driving: scene = DrivingScene(size: CGSize(width: 1280, height: 720))
-        case .foxTrail: scene = FoxTrailScene(size: CGSize(width: 1280, height: 720))
-        }
-        scene.scaleMode = .resizeFill
-        return scene
+        .handlesExternalEvents(matching: ["*"])
     }
 }
 
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
-    @State private var game: Game?
+    @StateObject private var library = GameLibrary(builtIns: BuiltInGames.all)
+    @State private var game: GameEntry?
     @State private var measuringLatency = false
+    @State private var message: LibraryMessage?
 
     var body: some View {
         ZStack {
@@ -77,18 +31,36 @@ struct ContentView: View {
                 GameView(camera: camera, game: game) { self.game = nil }
                     .id(game)
             } else {
-                MenuView(camera: camera, onPlay: { game = $0 }, onMeasureLatency: { measuringLatency = true })
+                MenuView(camera: camera, library: library, message: $message,
+                         onPlay: { game = $0 }, onMeasureLatency: { measuringLatency = true })
             }
         }
         .onAppear { camera.start() }
+        .onOpenURL { url in
+            // Double-clicking a .jigglegame file in Finder.
+            guard url.isFileURL else { return }
+            game = nil
+            do {
+                let entry = try library.importGame(from: url)
+                message = LibraryMessage(title: "Added \(entry.emoji) \(entry.title)", detail: "It's in the menu now.")
+            } catch {
+                message = LibraryMessage(title: "Couldn't add that game", detail: error.localizedDescription)
+            }
+        }
     }
+}
+
+struct LibraryMessage: Identifiable {
+    let id = UUID()
+    let title: String
+    let detail: String
 }
 
 // MARK: - Game
 
 struct GameView: View {
     @ObservedObject var camera: CameraManager
-    let game: Game
+    let game: GameEntry
     let onExit: () -> Void
     @State private var scene: GameScene
     @State private var ready = false
@@ -96,11 +68,11 @@ struct GameView: View {
     @State private var showStats = false
     @AppStorage("warnTooClose") private var warnTooClose = true
 
-    init(camera: CameraManager, game: Game, onExit: @escaping () -> Void) {
+    init(camera: CameraManager, game: GameEntry, onExit: @escaping () -> Void) {
         self.camera = camera
         self.game = game
         self.onExit = onExit
-        _scene = State(initialValue: game.makeScene())
+        _scene = State(initialValue: game.scene())
         showsCamera = game.showsCamera
     }
 
@@ -166,7 +138,9 @@ struct GameView: View {
 
 struct MenuView: View {
     @ObservedObject var camera: CameraManager
-    let onPlay: (Game) -> Void
+    @ObservedObject var library: GameLibrary
+    @Binding var message: LibraryMessage?
+    let onPlay: (GameEntry) -> Void
     let onMeasureLatency: () -> Void
     @AppStorage("warnTooClose") private var warnTooClose = true
 
@@ -180,21 +154,19 @@ struct MenuView: View {
                     .font(.system(size: 64, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
 
-                HStack(spacing: 20) {
-                    ForEach(Array(Game.allCases.enumerated()), id: \.element) { index, game in
-                        Button { onPlay(game) } label: {
-                            VStack(spacing: 10) {
-                                Text(game.emoji).font(.system(size: 80))
-                                Text(game.title).font(.system(size: 28, weight: .bold, design: .rounded))
-                            }
-                            .frame(width: 190, height: 190)
-                            .background(RoundedRectangle(cornerRadius: 32).fill(game.color.gradient))
-                            .foregroundStyle(.white)
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [])
-                        .help("Press \(index + 1)")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170, maximum: 190), spacing: 18)], spacing: 18) {
+                    ForEach(Array(library.games.enumerated()), id: \.element.id) { index, game in
+                        gameCard(game, index: index)
                     }
+                }
+                .frame(maxWidth: 1060)
+
+                HStack(spacing: 12) {
+                    Button("➕ Import game…", action: importGame)
+                        .help("Add a .jigglegame file")
+                    Text("Right-click an imported game to export or remove it.")
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.6))
                 }
 
                 status
@@ -244,6 +216,79 @@ struct MenuView: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
             .padding(40)
+        }
+        .alert(item: $message) { m in
+            Alert(title: Text(m.title), message: Text(m.detail))
+        }
+    }
+
+    @ViewBuilder private func gameCard(_ game: GameEntry, index: Int) -> some View {
+        let card = Button { onPlay(game) } label: {
+            VStack(spacing: 8) {
+                Text(game.emoji).font(.system(size: 70))
+                Text(game.title)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(10)
+            .frame(width: 170, height: 170)
+            .background(RoundedRectangle(cornerRadius: 30).fill(game.color.gradient))
+            .overlay(alignment: .topTrailing) {
+                if !game.isBuiltIn { Text("📦").font(.system(size: 22)).padding(10) }
+            }
+            .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .help(game.pack?.manifest.description ?? game.title)
+        .contextMenu {
+            if game.isBuiltIn {
+                Text("Built-in game")
+            } else {
+                Button("Export…") { export(game) }
+                Button("Remove", role: .destructive) { remove(game) }
+                if let author = game.pack?.manifest.author { Text("By \(author)") }
+            }
+        }
+
+        if index < 9 {
+            card.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [])
+        } else {
+            card
+        }
+    }
+
+    private func importGame() {
+        let panel = NSOpenPanel()
+        panel.title = "Import a Jiggle Jam game"
+        panel.allowedContentTypes = [UTType(filenameExtension: GamePack.fileExtension) ?? .zip, .zip, .folder]
+        panel.canChooseDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let entry = try library.importGame(from: url)
+            message = LibraryMessage(title: "Added \(entry.emoji) \(entry.title)", detail: "It's in the menu now.")
+        } catch {
+            message = LibraryMessage(title: "Couldn't add that game", detail: error.localizedDescription)
+        }
+    }
+
+    private func export(_ game: GameEntry) {
+        let panel = NSSavePanel()
+        panel.title = "Export \(game.title)"
+        panel.nameFieldStringValue = "\(game.title).\(GamePack.fileExtension)"
+        panel.allowedContentTypes = [UTType(filenameExtension: GamePack.fileExtension) ?? .zip]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try library.export(game, to: url)
+            message = LibraryMessage(title: "Exported \(game.title)", detail: "Share \(url.lastPathComponent); double-click it to add it to Jiggle Jam.")
+        } catch {
+            message = LibraryMessage(title: "Couldn't export that game", detail: error.localizedDescription)
+        }
+    }
+
+    private func remove(_ game: GameEntry) {
+        do { try library.remove(game) } catch {
+            message = LibraryMessage(title: "Couldn't remove that game", detail: error.localizedDescription)
         }
     }
 

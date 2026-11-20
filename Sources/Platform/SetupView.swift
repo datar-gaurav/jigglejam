@@ -9,53 +9,51 @@ struct SetupCheck {
     let test: (PoseFrame) -> Bool
 }
 
-extension Game {
-    /// Spoken and shown when setup starts.
-    var setupInstruction: String {
+/// Named setup checks. Built-in games and game packs (manifest `setup.checks`) pick from these.
+/// Raw values must match `GamePack.knownSetupChecks`.
+enum SetupRequirement: String, CaseIterable {
+    case seen, hands, feet, knees, wholeBody, bothHands, wheelLevel
+
+    var check: SetupCheck {
         switch self {
-        case .bubblePop: return "Show me your hands and your feet!"
-        case .freezeDance: return "Stand back so I can see all of you!"
-        case .rocketJump: return "Stand back, feet on the floor, ready to jump!"
-        case .driving: return "Hold your plate with both hands, nice and flat!"
-        case .foxTrail: return "Stand back so I can see your knees and feet!"
+        case .seen:
+            return SetupCheck(label: "I see you", hint: "Come and stand in front of the camera!") { !$0.bodies.isEmpty }
+        case .hands:
+            return SetupCheck(label: "Hands", hint: "Hold your hands up high!") { f in
+                f.bodies.contains { $0[.leftWrist] != nil && $0[.rightWrist] != nil }
+            }
+        case .feet:
+            return SetupCheck(label: "Feet", hint: "Step back so I can see your feet!") { f in
+                f.bodies.contains { $0[.leftAnkle] != nil && $0[.rightAnkle] != nil }
+            }
+        case .knees:
+            return SetupCheck(label: "Knees", hint: "Step back so I can see your knees!") { f in
+                f.bodies.contains { $0[.leftKnee] != nil && $0[.rightKnee] != nil }
+            }
+        case .wholeBody:
+            return SetupCheck(label: "Head to toe", hint: "Step back so I can see you from head to toe!") { f in
+                f.bodies.contains { ($0[.nose] != nil || $0[.neck] != nil) && ($0[.leftAnkle] != nil || $0[.rightAnkle] != nil) }
+            }
+        case .bothHands:
+            return SetupCheck(label: "Both hands", hint: "Hold the plate with both hands!") { $0.hands.count >= 2 }
+        case .wheelLevel:
+            return SetupCheck(label: "Wheel flat", hint: "Hold your wheel nice and flat!") { f in
+                guard f.hands.count >= 2 else { return false }
+                let dx = abs(f.hands[1].x - f.hands[0].x) * f.imageSize.width
+                let dy = (f.hands[1].y - f.hands[0].y) * f.imageSize.height
+                return abs(atan2(dy, dx)) < 10 * .pi / 180
+            }
         }
     }
+}
 
-    /// Games that need the whole body get the too-close check (when that warning is on).
-    var needsFullBody: Bool { self != .driving }
-
+extension GameEntry {
     func setupChecks(warnTooClose: Bool) -> [SetupCheck] {
-        let seen = SetupCheck(label: "I see you", hint: "Come and stand in front of the camera!") { !$0.bodies.isEmpty }
-        let hands = SetupCheck(label: "Hands", hint: "Hold your hands up high!") { f in
-            f.bodies.contains { $0[.leftWrist] != nil && $0[.rightWrist] != nil }
+        var checks = setupRequirements.map(\.check)
+        if needsFullBody && warnTooClose {
+            checks.append(SetupCheck(label: "Not too close", hint: "Take a big step back!") { !$0.tooClose })
         }
-        let feet = SetupCheck(label: "Feet", hint: "Step back so I can see your feet!") { f in
-            f.bodies.contains { $0[.leftAnkle] != nil && $0[.rightAnkle] != nil }
-        }
-        let knees = SetupCheck(label: "Knees", hint: "Step back so I can see your knees!") { f in
-            f.bodies.contains { $0[.leftKnee] != nil && $0[.rightKnee] != nil }
-        }
-        let wholeBody = SetupCheck(label: "Head to toe", hint: "Step back so I can see you from head to toe!") { f in
-            f.bodies.contains { ($0[.nose] != nil || $0[.neck] != nil) && ($0[.leftAnkle] != nil || $0[.rightAnkle] != nil) }
-        }
-        let notTooClose = SetupCheck(label: "Not too close", hint: "Take a big step back!") { !$0.tooClose }
-        let wheelHands = SetupCheck(label: "Both hands", hint: "Hold the plate with both hands!") { $0.hands.count >= 2 }
-        let wheelLevel = SetupCheck(label: "Wheel flat", hint: "Hold your wheel nice and flat!") { f in
-            guard f.hands.count >= 2 else { return false }
-            let dx = abs(f.hands[1].x - f.hands[0].x) * f.imageSize.width
-            let dy = (f.hands[1].y - f.hands[0].y) * f.imageSize.height
-            return abs(atan2(dy, dx)) < 10 * .pi / 180
-        }
-
-        var checks: [SetupCheck]
-        switch self {
-        case .bubblePop: checks = [seen, hands, feet]
-        case .freezeDance: checks = [seen, wholeBody]
-        case .rocketJump: checks = [seen, wholeBody, feet]
-        case .foxTrail: checks = [seen, knees, feet]
-        case .driving: checks = [wheelHands, wheelLevel]
-        }
-        if needsFullBody && warnTooClose { checks.append(notTooClose) }
+        if checks.isEmpty { checks = [SetupRequirement.seen.check] }
         return checks
     }
 }
@@ -65,7 +63,7 @@ extension Game {
 /// been ✅ for a second, or after 10 seconds regardless, so setup can never block play.
 struct SetupView: View {
     @ObservedObject var camera: CameraManager
-    let game: Game
+    let game: GameEntry
     let warnTooClose: Bool
     let onReady: () -> Void
 

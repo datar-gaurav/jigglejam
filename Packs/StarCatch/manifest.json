@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "id": "com.jigglejam.star-catch",
+  "title": "Star Catch",
+  "emoji": "🌟",
+  "color": "#0A84FF",
+  "author": "Jiggle Jam",
+  "version": "1",
+  "description": "Catch falling stars with your hands. Jump to make a star shower!",
+  "main": "game.js",
+  "showsCamera": true,
+  "needsFullBody": true,
+  "setup": {
+    "instruction": "Hands up high, ready to catch stars!",
+    "checks": ["seen", "hands", "feet"]
+  }
+}

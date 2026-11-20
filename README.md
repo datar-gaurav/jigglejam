@@ -34,6 +34,13 @@ If nobody can be seen for a moment, or the camera stops sending frames, the game
 "👀 Looking for you…" and picks up again with "There you are!" once the player is back. Stale
 camera frames are never used as input: movement stops the moment the picture goes stale.
 
+## Game packs
+
+Games can also come as **`.jigglegame` files**: a manifest plus JavaScript, run in a sandbox
+on top of the platform's tracking, setup and effects. Double-click one (or **➕ Import game…**)
+to add it; right-click an imported game to export or remove it. The sample **Star Catch** 🌟
+installs on first launch. Write your own with [docs/GAME_PACKS.md](docs/GAME_PACKS.md).
+
 ## Run it
 
 Requires macOS 14+, Xcode, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
@@ -74,32 +81,29 @@ one slow-motion clip, then count the frames between them.
 
 ## How it works
 
-| File | Role |
+The code is split into the **platform** and the **games**:
+
+| Folder | Role |
 | --- | --- |
-| `Sources/PoseTypes.swift` | Pose data passed from the camera to games, with a freshness check |
-| `Sources/CameraManager.swift` | Capture session, camera picking, Vision body-pose per frame → hand/foot points |
-| `Sources/CameraPreview.swift` | Mirrored live camera background |
-| `Sources/SetupView.swift` | Per-game setup screen and its checks |
-| `Sources/LatencyTestView.swift` | Screen-to-camera delay measurement |
-| `Sources/GameScene.swift` | Base class for games: pose input, coordinate mapping, speech, confetti |
-| `Sources/BubbleScene.swift` | Bubble Pop |
-| `Sources/FreezeDanceScene.swift` | Freeze Dance: phases, motion/stillness detection (tuning constants at top) |
-| `Sources/RocketJumpScene.swift` | Rocket Jump |
-| `Sources/DrivingScene.swift` | Vroom Vroom: plate steering from wrist tilt, scrolling road (tuning at top) |
-| `Sources/FoxTrailScene.swift` | Fox Trail: side-scroller physics, crates, fruit, levels |
-| `Sources/MotionDetectors.swift` | Shared `PlayerTracker`, `JumpDetector` and `WalkDetector` (tuning at top of each) |
-| `Sources/DanceMusic.swift` | Tiny synthesized chiptune band, so no audio files are needed |
-| `Sources/JiggleJamApp.swift` | App, parent menu, game screen |
+| `Sources/Platform/` | Camera, pose tracking (`PoseTypes`, `CameraManager`), motion detectors, `GameScene` base (pausing, speech, effects), setup screen, game library and menu |
+| `Sources/Platform/Packs/` | Game packs: format and import/export (`GamePack`), JavaScript sandbox (`ScriptHost`), and the scene that runs packs (`ScriptedGameScene`) |
+| `Sources/Games/` | Built-in Swift games, registered in `BuiltInGames.swift` |
+| `Packs/` | Sample game packs shipped with the app |
+| `Tests/` | Pose replay tests for the detectors; pack format and script host tests |
+
+Built-in games subclass `GameScene` and implement `tick(dt:pose:)`; see `BubbleScene.swift` for
+the simplest example. Pack games use the JavaScript API instead.
 
 ## Privacy
 
 Everything runs on the Mac. Camera frames are analysed in memory by Apple's Vision framework
-and are never recorded, saved or sent anywhere.
+and are never recorded, saved or sent anywhere. Game packs only see the tracking results
+(joint positions), never camera images.
 
 ## Contributing
 
-Ideas, new games and fixes are welcome — open an issue or a pull request. Games subclass
-`GameScene` and implement `tick(dt:pose:)`; see `BubbleScene.swift` for the simplest example.
+Ideas, new games and fixes are welcome — open an issue or a pull request. New games can be
+built-in Swift games or game packs; a pack is the easiest way to share one.
 
 ## License
 

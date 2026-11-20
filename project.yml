@@ -12,7 +12,12 @@ targets:
   JiggleJam:
     type: application
     platform: macOS
-    sources: [Sources]
+    sources:
+      - path: Sources
+      # Sample game packs shipped with the app; installed into the library on first launch.
+      - path: Packs
+        type: folder
+        buildPhase: resources
     info:
       path: Sources/Info.plist
       properties:
@@ -20,6 +25,17 @@ targets:
         LSApplicationCategoryType: public.app-category.kids-games
         NSCameraUsageDescription: Jiggle Jam uses the camera to see your moves so you can play games with your body.
         NSCameraUseContinuityCameraDeviceType: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Jiggle Jam Game
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [com.jigglejam.game]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.jigglejam.game
+            UTTypeDescription: Jiggle Jam Game
+            UTTypeConformsTo: [public.data, public.zip-archive]
+            UTTypeTagSpecification:
+              public.filename-extension: [jigglegame]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jigglejam.app
@@ -29,11 +45,13 @@ targets:
   JiggleJamTests:
     type: bundle.unit-test
     platform: macOS
-    # Pure logic only (no app host): pose types + motion detectors, driven by synthetic poses.
+    # Pure logic only (no app host): pose types, motion detectors, game-pack format and script host.
     sources:
       - path: Tests
-      - path: Sources/PoseTypes.swift
-      - path: Sources/MotionDetectors.swift
+      - path: Sources/Platform/PoseTypes.swift
+      - path: Sources/Platform/MotionDetectors.swift
+      - path: Sources/Platform/Packs/GamePack.swift
+      - path: Sources/Platform/Packs/ScriptHost.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jigglejam.tests
