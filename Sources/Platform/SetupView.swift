@@ -82,25 +82,30 @@ struct SetupView: View {
 
     var body: some View {
         ZStack {
-            CameraPreview(session: camera.session).ignoresSafeArea()
+            CameraBackground(session: camera.session).ignoresSafeArea()
             TrackingOverlay(camera: camera, dotScale: 2.2).ignoresSafeArea()
+            // Scrims keep text readable over any room.
+            LinearGradient(colors: [.black.opacity(0.55), .clear, .clear, .black.opacity(0.7)],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
-            VStack {
+            VStack(spacing: 0) {
+                topBar
                 Spacer()
-                card
+                panel
             }
-            .padding(36)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 26)
 
             if let finished {
-                Text(finished)
-                    .font(.system(size: 120, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 12)
-                    .transition(.scale.combined(with: .opacity))
+                readyBurst(finished)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
-        .animation(.spring(duration: 0.35), value: finished)
-        .animation(.easeOut(duration: 0.2), value: passed)
+        .environment(\.colorScheme, .dark)
+        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: finished)
+        .animation(.spring(response: 0.35, dampingFraction: 0.65), value: passed)
         .onAppear {
             startedAt = uptime()
             say(game.setupInstruction)
@@ -108,41 +113,117 @@ struct SetupView: View {
         .onReceive(Timer.publish(every: 1.0 / 15, on: .main, in: .common).autoconnect()) { _ in evaluate() }
     }
 
-    private var card: some View {
-        VStack(spacing: 18) {
-            Text("\(game.emoji)  \(game.title)")
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.85))
+    // Leaves room on the left for the game screen's close button.
+    private var topBar: some View {
+        HStack(spacing: 14) {
+            Spacer().frame(width: 60)
+            Spacer()
+            HStack(spacing: 10) {
+                Text(game.emoji).font(.system(size: 28))
+                Text(game.title).font(.system(size: 24, weight: .heavy, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(Capsule().fill(game.color.gradient).shadow(color: game.color.opacity(0.5), radius: 16, y: 6))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.3), lineWidth: 1))
+            Spacer()
+            countdown
+        }
+    }
+
+    private var countdown: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().stroke(.white.opacity(0.18), lineWidth: 5)
+                Circle()
+                    .trim(from: 0, to: max(0, 1 - elapsed / timeout))
+                    .stroke(game.color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 1.0 / 15), value: elapsed)
+                Text("\(max(0, Int((timeout - elapsed).rounded(.up))))")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .frame(width: 44, height: 44)
+            Button { finish("Let's go! 🎉") } label: {
+                HStack(spacing: 6) {
+                    Text("Start now")
+                    Image(systemName: "return")
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .glass(Capsule())
+            }
+            .buttonStyle(PressableStyle())
+            .keyboardShortcut(.defaultAction)
+            .help("Skip setup (Return)")
+        }
+        .foregroundStyle(.white)
+    }
+
+    private var panel: some View {
+        VStack(spacing: 22) {
             Text(game.setupInstruction)
-                .font(.system(size: 40, weight: .heavy, design: .rounded))
+                .font(.system(size: 46, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
+                .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
             HStack(spacing: 14) {
                 ForEach(Array(checks.enumerated()), id: \.offset) { index, check in
-                    let ok = index < passed.count && passed[index]
-                    Text("\(ok ? "✅" : "⬜️")  \(check.label)")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(ok ? Color.green.opacity(0.55) : Color.white.opacity(0.15)))
+                    checkChip(check.label, ok: index < passed.count && passed[index])
                 }
             }
-            HStack(spacing: 16) {
-                ProgressView(value: min(elapsed / timeout, 1))
-                    .tint(.white)
-                    .frame(width: 260)
-                Button("Start now") { finish("Let's go!") }
-                    .keyboardShortcut(.defaultAction)
-                    .help("Skip setup (Return)")
-            }
         }
-        .padding(28)
-        .background(RoundedRectangle(cornerRadius: 28).fill(.black.opacity(0.55)))
+        .padding(.horizontal, 36)
+        .padding(.vertical, 30)
+        .frame(maxWidth: 1100)
+        .glass(RoundedRectangle(cornerRadius: 36, style: .continuous))
+    }
+
+    private func checkChip(_ label: String, ok: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle.dashed")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(ok ? Color.green : .white.opacity(0.55))
+                .contentTransition(.symbolEffect(.replace))
+            Text(label)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(ok ? 1 : 0.8))
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 20)
+        .padding(.vertical, 12)
+        .background(Capsule().fill(ok ? Color.green.opacity(0.26) : .white.opacity(0.08)))
+        .overlay(Capsule().strokeBorder(ok ? Color.green.opacity(0.75) : .white.opacity(0.16), lineWidth: 1.5))
+        .scaleEffect(ok ? 1.04 : 1)
+    }
+
+    private func readyBurst(_ text: String) -> some View {
+        ZStack {
+            Circle()
+                .fill(game.color)
+                .frame(width: 520, height: 520)
+                .blur(radius: 120)
+                .opacity(0.55)
+            Text(text)
+                .font(.system(size: 120, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .shadow(color: game.color, radius: 30)
+                .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+        }
+        .allowsHitTesting(false)
     }
 
     private func evaluate() {
         guard finished == nil else { return }
+        if Snapshot.isActive {
+            // Snapshot: show a mid-setup state (first checks done) without a camera.
+            passed = checks.indices.map { $0 < checks.count / 2 + 1 }
+            elapsed = timeout * 0.35
+            return
+        }
         let now = uptime()
         elapsed = now - startedAt
         let frame = camera.latestFrame

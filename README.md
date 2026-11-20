@@ -4,6 +4,14 @@ Movement games for little kids, played on the TV. The Mac's camera (or an iPhone
 Continuity Camera) watches the player, Apple's Vision framework tracks their body, and the
 game reacts to their hands and feet. AirPlay the Mac to the TV and play from the couch.
 
+<p align="center">
+  <img src="docs/screenshots/menu.jpg" width="49%" alt="Jiggle Jam menu: colorful game cards with a status pill and a control bar">
+  <img src="docs/screenshots/setup.jpg" width="49%" alt="Setup screen: big instruction with a checklist of hands, feet and distance">
+</p>
+
+<sub>Screenshots use a placeholder where the live camera appears. Regenerate them with
+`JiggleJam -snapshot docs/screenshots` (debug builds).</sub>
+
 ## Games
 
 - **Bubble Pop** — bubbles float up; pop them with hands (white rings) or feet (yellow rings).

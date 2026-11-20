@@ -35,7 +35,13 @@ struct ContentView: View {
                          onPlay: { game = $0 }, onMeasureLatency: { measuringLatency = true })
             }
         }
-        .onAppear { camera.start() }
+        .onAppear {
+            if Snapshot.isActive {
+                DispatchQueue.main.async { Snapshot.renderAll(camera: camera, library: library) }
+            } else {
+                camera.start()
+            }
+        }
         .onOpenURL { url in
             // Double-clicking a .jigglegame file in Finder.
             guard url.isFileURL else { return }
@@ -86,11 +92,14 @@ struct GameView: View {
                 SetupView(camera: camera, game: game, warnTooClose: warnTooClose) { ready = true }
             }
             Button(action: onExit) {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 30))
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 40, height: 40)
+                    .glass(Circle())
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.5))
-            .padding(24)
+            .buttonStyle(PressableStyle())
+            .padding(22)
             .keyboardShortcut(.cancelAction) // Esc goes back to the menu
             .help("Back to menu (Esc)")
         }
@@ -110,7 +119,7 @@ struct GameView: View {
     @ViewBuilder private var playing: some View {
         ZStack(alignment: .topLeading) {
             if showsCamera {
-                CameraPreview(session: camera.session).ignoresSafeArea()
+                CameraBackground(session: camera.session).ignoresSafeArea()
             }
             SpriteView(scene: scene, preferredFramesPerSecond: 60, options: [.allowsTransparency, .ignoresSiblingOrder],
                        debugOptions: showStats ? [.showsFPS, .showsNodeCount] : [])
@@ -136,7 +145,7 @@ struct GameView: View {
     }
 }
 
-// MARK: - Menu (for the parent)
+// MARK: - Menu
 
 struct MenuView: View {
     @ObservedObject var camera: CameraManager
@@ -145,136 +154,219 @@ struct MenuView: View {
     let onPlay: (GameEntry) -> Void
     let onMeasureLatency: () -> Void
     @AppStorage("warnTooClose") private var warnTooClose = true
+    @State private var showTVHelp = false
+
+    private var cameraBlocked: Bool { camera.authorization == .denied || camera.authorization == .restricted }
 
     var body: some View {
         ZStack {
-            CameraPreview(session: camera.session).ignoresSafeArea()
-            Color.black.opacity(0.45).ignoresSafeArea()
+            MenuBackground(camera: camera)
 
-            VStack(spacing: 28) {
-                Text("Jiggle Jam")
-                    .font(.system(size: 64, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, 48)
+                    .padding(.top, 34)
 
-                // Scrolls when there are more games than fit, so the controls below stay on screen.
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 170, maximum: 190), spacing: 18)], spacing: 18) {
-                        ForEach(Array(library.games.enumerated()), id: \.element.id) { index, game in
-                            gameCard(game, index: index)
+                if cameraBlocked {
+                    Spacer()
+                    permissionCard
+                    Spacer()
+                } else {
+                    GeometryReader { space in
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 230), spacing: 24)], spacing: 24) {
+                            ForEach(Array(library.games.enumerated()), id: \.element.id) { index, game in
+                                GameCard(game: game, number: index + 1,
+                                         onPlay: { onPlay(game) },
+                                         onExport: { export(game) },
+                                         onRemove: { remove(game) })
+                            }
+                            AddGameCard(busy: library.isBusy, action: importGame)
                         }
+                        .frame(maxWidth: 1240)
+                        .padding(.horizontal, 48)
+                        .padding(.vertical, 30)
+                        // Centered when everything fits; scrolls when it doesn't.
+                        .frame(maxWidth: .infinity, minHeight: space.size.height)
                     }
-                    .padding(.vertical, 6)
-                }
-                .scrollIndicators(.automatic)
-                .frame(maxWidth: 1060, minHeight: 190, maxHeight: 400)
-                .layoutPriority(-1) // give up height before the controls do
-
-                HStack(spacing: 12) {
-                    Button("➕ Import game…", action: importGame)
-                        .help("Add a .jigglegame file")
-                        .disabled(library.isBusy)
-                    if library.isBusy {
-                        ProgressView().controlSize(.small)
-                        Text("Adding game…").font(.callout).foregroundStyle(.white)
-                    } else {
-                        Text("Right-click an imported game to export or remove it.")
-                            .font(.callout)
-                            .foregroundStyle(.white.opacity(0.6))
+                    .scrollIndicators(.never)
                     }
                 }
 
-                status
-
-                HStack(spacing: 16) {
-                    Picker("Camera", selection: Binding(
-                        get: { camera.switchingToID ?? camera.currentDeviceID ?? "" },
-                        set: { camera.select($0) }
-                    )) {
-                        ForEach(camera.devices, id: \.uniqueID) { device in
-                            Text(device.localizedName).tag(device.uniqueID)
-                        }
-                    }
-                    .frame(width: 340)
-
-                    Button("Refresh") { camera.refresh() }
-                    Toggle("Warn when too close", isOn: $warnTooClose)
-                        .toggleStyle(.switch)
-                        .foregroundStyle(.white)
-                    Button("Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
-                    Button("📏 Display delay test", action: onMeasureLatency)
-                        .help("Display-to-camera loopback: compare HDMI and AirPlay")
-                }
-
-                if let notice = camera.cameraNotice {
-                    Text(notice)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.yellow)
-                        .multilineTextAlignment(.center)
-                }
-
-                if !camera.stats.isEmpty {
-                    Text(camera.stats)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-
-                if camera.authorization == .authorized && !camera.hasIPhone {
-                    Text("No iPhone camera found. Lock the iPhone, put it in landscape and keep it still near the Mac, then click Refresh.")
-                        .font(.callout)
-                        .foregroundStyle(.yellow)
-                        .multilineTextAlignment(.center)
-                }
-
-                Text("To play on the TV: Control Center → Screen Mirroring → choose your TV, then go Full Screen.")
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.75))
+                notices
+                    .padding(.bottom, 14)
+                controlBar
+                    .padding(.bottom, 28)
             }
-            .padding(40)
         }
+        .environment(\.colorScheme, .dark)
         .alert(item: $message) { m in
             Alert(title: Text(m.title), message: Text(m.detail))
         }
     }
 
-    @ViewBuilder private func gameCard(_ game: GameEntry, index: Int) -> some View {
-        let card = Button { onPlay(game) } label: {
-            VStack(spacing: 8) {
-                Text(game.emoji).font(.system(size: 70))
-                Text(game.title)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(10)
-            .frame(width: 170, height: 170)
-            .background(RoundedRectangle(cornerRadius: 30).fill(game.color.gradient))
-            .overlay(alignment: .topTrailing) {
-                if !game.isBuiltIn { Text("📦").font(.system(size: 22)).padding(10) }
-            }
-            .foregroundStyle(.white)
-        }
-        .buttonStyle(.plain)
-        .help(game.pack?.manifest.description ?? game.title)
-        .contextMenu {
-            if game.isBuiltIn {
-                Text("Built-in game")
-            } else {
-                Button("Export…") { export(game) }
-                Button("Remove", role: .destructive) { remove(game) }
-                if let author = game.pack?.manifest.author { Text("By \(author)") }
-            }
-        }
+    // MARK: Header
 
-        if index < 9 {
-            card.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [])
-        } else {
-            card
+    private var header: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Jiggle Jam")
+                    .font(.system(size: 54, weight: .black, design: .rounded))
+                    .foregroundStyle(Theme.brandGradient)
+                    .shadow(color: Theme.pink.opacity(0.35), radius: 18)
+                Text("Move your body to play")
+                    .font(.system(size: 19, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            Spacer()
+            if !cameraBlocked { StatusPill(kind: status.kind, text: status.text) }
         }
     }
 
+    private var status: (kind: StatusPill.Kind, text: String) {
+        if camera.currentDeviceID == nil && camera.devices.isEmpty { return (.warning, "No camera") }
+        if warnTooClose && camera.tooClose { return (.warning, "Too close, step back") }
+        switch camera.peopleCount {
+        case 0: return (.waiting, "Looking for players")
+        case 1: return (.good, "1 player ready")
+        default: return (.good, "\(camera.peopleCount) players ready")
+        }
+    }
+
+    // MARK: Camera permission
+
+    private var permissionCard: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "video.slash.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(Theme.orange)
+            Text("Jiggle Jam needs the camera")
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+            Text("Turn on Jiggle Jam under Privacy & Security → Camera, then come back.\nIf macOS asks to quit and reopen, do that.")
+                .font(.system(size: 16))
+                .foregroundStyle(.white.opacity(0.75))
+                .multilineTextAlignment(.center)
+            HStack(spacing: 12) {
+                Button("Open Privacy Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.pink)
+                Button("I've turned it on") { camera.refresh() }
+                    .buttonStyle(.bordered)
+            }
+            .controlSize(.large)
+        }
+        .foregroundStyle(.white)
+        .padding(40)
+        .frame(maxWidth: 560)
+        .glass(RoundedRectangle(cornerRadius: 32, style: .continuous))
+    }
+
+    // MARK: Notices and control bar
+
+    @ViewBuilder private var notices: some View {
+        VStack(spacing: 8) {
+            if let notice = camera.cameraNotice {
+                NoticeBanner(symbol: "exclamationmark.triangle.fill", text: notice, tint: Theme.yellow)
+            }
+            if camera.authorization == .authorized && !camera.hasIPhone {
+                NoticeBanner(symbol: "iphone",
+                             text: "To use your iPhone as the camera: lock it, stand it up sideways near the Mac, then press ↻.",
+                             tint: Theme.blue)
+            }
+        }
+    }
+
+    private var controlBar: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "video.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.leading, 6)
+            if camera.devices.isEmpty {
+                Text("No camera found")
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 210, alignment: .leading)
+            } else {
+                Picker("Camera", selection: Binding(
+                    get: { camera.switchingToID ?? camera.currentDeviceID ?? "" },
+                    set: { camera.select($0) }
+                )) {
+                    ForEach(camera.devices, id: \.uniqueID) { device in
+                        Text(device.localizedName).tag(device.uniqueID)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 210)
+            }
+            BarIconButton(symbol: "arrow.clockwise", help: "Look for cameras again") { camera.refresh() }
+
+            barDivider
+
+            Toggle(isOn: $warnTooClose) {
+                Text("Too-close warning").font(.system(size: 13, weight: .medium))
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .help("Pause games when a player is so close that their feet leave the picture")
+
+            barDivider
+
+            BarIconButton(symbol: "tv", help: "Play on the TV") { showTVHelp.toggle() }
+                .popover(isPresented: $showTVHelp, arrowEdge: .top) { tvHelp }
+            BarIconButton(symbol: "gauge.with.needle", help: "Display delay test (HDMI vs AirPlay)", action: onMeasureLatency)
+            BarIconButton(symbol: "arrow.up.left.and.arrow.down.right", help: "Full screen") {
+                NSApp.keyWindow?.toggleFullScreen(nil)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .glass(Capsule())
+    }
+
+    private var barDivider: some View {
+        Rectangle().fill(.white.opacity(0.15)).frame(width: 1, height: 22)
+    }
+
+    private var tvHelp: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Play on the TV").font(.title3.bold())
+            ForEach(Array([
+                ("rectangle.on.rectangle", "Open Control Center → Screen Mirroring"),
+                ("tv", "Choose your TV"),
+                ("arrow.up.left.and.arrow.down.right", "Click Full Screen"),
+            ].enumerated()), id: \.offset) { index, step in
+                HStack(spacing: 12) {
+                    Text("\(index + 1)")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Theme.pink.opacity(0.85)))
+                        .foregroundStyle(.white)
+                    Image(systemName: step.0).frame(width: 20)
+                    Text(step.1)
+                }
+            }
+            Divider()
+            Label("For the least delay, connect the Mac with an HDMI cable.", systemImage: "cable.connector")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            if !camera.stats.isEmpty {
+                Text(camera.stats)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+
+    // MARK: Library actions
+
     private func importGame() {
         let panel = NSOpenPanel()
-        panel.title = "Import a Jiggle Jam game"
+        panel.title = "Add a Jiggle Jam game"
         panel.allowedContentTypes = [UTType(filenameExtension: GamePack.fileExtension) ?? .zip, .zip, .folder]
         panel.canChooseDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -307,38 +399,6 @@ struct MenuView: View {
     private func remove(_ game: GameEntry) {
         do { try library.remove(game) } catch {
             message = LibraryMessage(title: "Couldn't remove that game", detail: error.localizedDescription)
-        }
-    }
-
-    @ViewBuilder private var status: some View {
-        switch camera.authorization {
-        case .denied, .restricted:
-            VStack(spacing: 8) {
-                Text("Camera access is off.").font(.title2.bold())
-                HStack {
-                    Button("Open Privacy Settings") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!)
-                    }
-                    Button("I've turned it on") { camera.refresh() }
-                }
-                Text("Turn on Jiggle Jam under Camera, then come back. If macOS asks to quit and reopen, do that.")
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-            .foregroundStyle(.white)
-        default:
-            Text(statusText)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.white)
-        }
-    }
-
-    private var statusText: String {
-        if warnTooClose && camera.tooClose { return "✋ Too close — take a big step back" }
-        switch camera.peopleCount {
-        case 0: return "👀 Looking for players… stand back so the camera sees your whole body"
-        case 1: return "✅ I can see you!"
-        default: return "✅ I can see \(camera.peopleCount) players!"
         }
     }
 }

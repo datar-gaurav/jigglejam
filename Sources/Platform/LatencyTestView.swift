@@ -138,17 +138,24 @@ struct LatencyTestView: View {
             .padding(20)
             .frame(width: 440, alignment: .leading)
             .foregroundStyle(.primary)
-            .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .windowBackgroundColor).opacity(0.92)))
+            // Solid (not glass) so the panel doesn't change with the flashing screen behind it.
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(white: 0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.12)))
+            .environment(\.colorScheme, .dark)
             .padding(.top, 70)
             .padding(.leading, 24)
 
             Button(action: onExit) {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 30))
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 40, height: 40)
+                    .glass(Circle())
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.gray)
-            .padding(24)
+            .buttonStyle(PressableStyle())
+            .padding(22)
             .keyboardShortcut(.cancelAction)
+            .help("Back to menu (Esc)")
         }
         .onAppear { probe.start() }
         .onDisappear { probe.stop() }
