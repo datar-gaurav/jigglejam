@@ -155,6 +155,7 @@ struct MenuView: View {
     let onMeasureLatency: () -> Void
     @AppStorage("warnTooClose") private var warnTooClose = true
     @State private var showTVHelp = false
+    @StateObject private var soundCheck = SoundCheck()
 
     private var cameraBlocked: Bool { camera.authorization == .denied || camera.authorization == .restricted }
 
@@ -195,6 +196,7 @@ struct MenuView: View {
 
                 notices
                     .padding(.bottom, 14)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: soundCheck.playingOn)
                 controlBar
                     .padding(.bottom, 28)
             }
@@ -267,6 +269,12 @@ struct MenuView: View {
 
     @ViewBuilder private var notices: some View {
         VStack(spacing: 8) {
+            if let device = soundCheck.playingOn {
+                NoticeBanner(symbol: "speaker.wave.2.fill",
+                             text: "Sound is playing on \(device). Can't hear it? Check that device's volume, or pick another output in Control Center → Sound.",
+                             tint: .green)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if let notice = camera.cameraNotice {
                 NoticeBanner(symbol: "exclamationmark.triangle.fill", text: notice, tint: Theme.yellow)
             }
@@ -316,6 +324,9 @@ struct MenuView: View {
 
             BarIconButton(symbol: "tv", help: "Play on the TV") { showTVHelp.toggle() }
                 .popover(isPresented: $showTVHelp, arrowEdge: .top) { tvHelp }
+            BarIconButton(symbol: "speaker.wave.2.fill", help: "Sound test: says hello and shows where the sound is playing") {
+                soundCheck.run()
+            }
             BarIconButton(symbol: "gauge.with.needle", help: "Display delay test (HDMI vs AirPlay)", action: onMeasureLatency)
             BarIconButton(symbol: "arrow.up.left.and.arrow.down.right", help: "Full screen") {
                 NSApp.keyWindow?.toggleFullScreen(nil)
