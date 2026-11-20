@@ -10,7 +10,7 @@ final class DrivingScene: GameScene {
     private let deadZone: CGFloat = 0.09          // ~5°: holding it roughly level drives straight
     private let cruiseSpeed: CGFloat = 0.55       // screen heights per second
     private let offRoadSpeed: CGFloat = 0.3
-    private let waitingSpeed: CGFloat = 0.2       // when hands are not visible
+    private let acceleration: CGFloat = 0.6       // how quickly it speeds up to cruise (per second)
 
     override var needsFullBody: Bool { false }    // only hands matter here
 
@@ -35,7 +35,7 @@ final class DrivingScene: GameScene {
     private var distance: CGFloat = 0
     private var steer: CGFloat = 0
     private var carX: CGFloat = 0
-    private var started = false
+    private var carSpeed: CGFloat = 0
     private var handsMissing: TimeInterval = 0
     private var offRoadTime: TimeInterval = 0
     private var now: TimeInterval = 0
@@ -67,7 +67,7 @@ final class DrivingScene: GameScene {
         addChild(hintLabel)
         addChild(wheel)
         buildWorld()
-        say("Let's drive! Hold your plate like a steering wheel, and turn it to steer!")
+        say("Vroom vroom! Hold your plate like a steering wheel, and turn it to steer!")
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -204,10 +204,6 @@ final class DrivingScene: GameScene {
         // Steering
         if let target = plateSteering(pose) {
             handsMissing = 0
-            if !started {
-                started = true
-                say("Vroom vroom! Collect the stars!")
-            }
             steer += (target - steer) * 0.25
         } else {
             handsMissing += Double(dt)
@@ -221,13 +217,13 @@ final class DrivingScene: GameScene {
         let carD = distance + carY / size.height
         let offRoad = abs(carX - roadCenter(at: carD)) > roadWidth / 2
         offRoadTime = offRoad ? offRoadTime + Double(dt) : 0
-        var speed = !started || handsMissing > 1 ? waitingSpeed : cruiseSpeed
-        if offRoad { speed = min(speed, offRoadSpeed) }
-        if !started { speed = 0 }
-        distance += speed * dt
+        // Drives by itself: smoothly speeds up to cruise, and eases off on the grass.
+        let targetSpeed = offRoad ? offRoadSpeed : cruiseSpeed
+        carSpeed += (targetSpeed - carSpeed) * min(1, acceleration * dt * 3)
+        distance += carSpeed * dt
 
         carX = min(max(carX + steer * size.width * 0.5 * dt, size.width * 0.05), size.width * 0.95)
-        let bump: CGFloat = offRoad && speed > 0 ? .random(in: -3...3) : 0
+        let bump: CGFloat = offRoad ? .random(in: -3...3) : 0
         car.position = CGPoint(x: carX + bump, y: carY + bump)
         car.zRotation = -steer * 0.35
 
@@ -244,7 +240,8 @@ final class DrivingScene: GameScene {
     /// Steering from the tilt of the line between the wrists: right hand lower = turn right.
     private func plateSteering(_ pose: PoseFrame) -> CGFloat? {
         let pairs: [(CGPoint, CGPoint)] = pose.bodies.compactMap { body in
-            guard let a = body[.leftWrist], let b = body[.rightWrist] else { return nil }
+            // Wrists can be hidden behind the plate; elbows tilt the same way, so fall back to them.
+            guard let a = body[.leftWrist] ?? body[.leftElbow], let b = body[.rightWrist] ?? body[.rightElbow] else { return nil }
             let pa = scenePoint(a, imageSize: pose.imageSize), pb = scenePoint(b, imageSize: pose.imageSize)
             return pa.x < pb.x ? (pa, pb) : (pb, pa)
         }
