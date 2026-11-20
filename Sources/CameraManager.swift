@@ -22,6 +22,9 @@ struct PoseFrame {
     var peopleCount = 0
     /// Someone is so close to the camera that their whole body no longer fits.
     var tooClose = false
+    /// Hand centers from the dedicated hand tracker (only filled when hand tracking is on).
+    /// Normalized, mirrored, origin bottom-left. Works up close and with the body hidden.
+    var hands: [CGPoint] = []
     var imageSize = CGSize(width: 1280, height: 720)
     /// Camera timestamp in seconds; changes only when a new camera frame was analysed.
     var timestamp: Double = 0
@@ -48,7 +51,19 @@ final class CameraManager: NSObject, ObservableObject {
     private let videoQueue = DispatchQueue(label: "jigglejam.video", qos: .userInteractive)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let poseRequest = VNDetectHumanBodyPoseRequest()
+    private let handRequest: VNDetectHumanHandPoseRequest = {
+        let request = VNDetectHumanHandPoseRequest()
+        request.maximumHandCount = 2
+        return request
+    }()
     private let lock = NSLock()
+    private var _handTracking = false
+
+    /// Hand tracking costs extra time per frame, so games turn it on only when they need it.
+    var handTrackingEnabled: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _handTracking }
+        set { lock.lock(); _handTracking = newValue; lock.unlock() }
+    }
     private var frame = PoseFrame()
     private var lastPeopleCount = 0 // videoQueue only
     private var lastTooClose = false // videoQueue only
@@ -192,7 +207,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         let size = CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer))
         let handler = VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .up)
         let started = CACurrentMediaTime()
-        try? handler.perform([poseRequest])
+        let wantHands = handTrackingEnabled
+        try? handler.perform(wantHands ? [poseRequest, handRequest] : [poseRequest])
+        let hands = wantHands ? (handRequest.results ?? []).compactMap(Self.handCenter(from:)) : []
         recordStats(trackingTime: CACurrentMediaTime() - started, size: size)
         let people = poseRequest.results ?? []
 
@@ -202,6 +219,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             bodies: bodies,
             peopleCount: people.count,
             tooClose: bodies.contains(where: Self.isTooClose),
+            hands: hands,
             imageSize: size,
             timestamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         )
@@ -229,6 +247,15 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                           size.width, size.height, Double(statFrames) / elapsed, statTrackingTime / Double(statFrames) * 1000)
         statFrames = 0; statTrackingTime = 0; statStart = CACurrentMediaTime()
         DispatchQueue.main.async { self.stats = text }
+    }
+
+    private static func handCenter(from observation: VNHumanHandPoseObservation) -> CGPoint? {
+        guard let points = try? observation.recognizedPoints(.all) else { return nil }
+        let confident = points.values.filter { $0.confidence > 0.3 }
+        guard confident.count >= 5 else { return nil }
+        let x = confident.reduce(0) { $0 + $1.location.x } / CGFloat(confident.count)
+        let y = confident.reduce(0) { $0 + $1.location.y } / CGFloat(confident.count)
+        return CGPoint(x: 1 - x, y: y)
     }
 
     private static func body(from observation: VNHumanBodyPoseObservation) -> Body {

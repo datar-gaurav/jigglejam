@@ -126,10 +126,14 @@ struct GameView: View {
         .onAppear {
             let camera = camera
             scene.frameProvider = { camera.latestFrame }
+            camera.handTrackingEnabled = scene.wantsHandTracking
             scene.distanceWarningEnabled = warnTooClose
         }
         .onChange(of: warnTooClose) { _, on in scene.distanceWarningEnabled = on }
-        .onDisappear { scene.tearDown() }
+        .onDisappear {
+            scene.tearDown()
+            camera.handTrackingEnabled = false
+        }
     }
 }
 

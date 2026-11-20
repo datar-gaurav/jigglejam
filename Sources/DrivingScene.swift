@@ -13,6 +13,7 @@ final class DrivingScene: GameScene {
     private let acceleration: CGFloat = 0.6       // how quickly it speeds up to cruise (per second)
 
     override var needsFullBody: Bool { false }    // only hands matter here
+    override var wantsHandTracking: Bool { true }
 
     private final class RoadItem {
         enum Kind { case star, puddle, decoration }
@@ -50,6 +51,10 @@ final class DrivingScene: GameScene {
 
     private var car = SKNode()
     private let wheel = SKNode()
+    private let handsPanel = SKNode()
+    private let handsFrame = SKShapeNode()
+    private let handsLine = SKShapeNode()
+    private let handDots = [SKShapeNode(circleOfRadius: 7), SKShapeNode(circleOfRadius: 7)]
     private lazy var scoreLabel = makeLabel("⭐️ 0", size: 0.08)
     private lazy var hintLabel = makeLabel("Hold your plate up with both hands 🍽️", size: 0.06)
 
@@ -66,6 +71,16 @@ final class DrivingScene: GameScene {
         addChild(scoreLabel)
         addChild(hintLabel)
         addChild(wheel)
+        handsFrame.fillColor = NSColor.black.withAlphaComponent(0.35)
+        handsFrame.strokeColor = NSColor.white.withAlphaComponent(0.6)
+        handsFrame.lineWidth = 2
+        handsLine.strokeColor = .white
+        handsLine.lineWidth = 3
+        handsPanel.addChild(handsFrame)
+        handsPanel.addChild(handsLine)
+        handDots.forEach { $0.strokeColor = .clear; handsPanel.addChild($0) }
+        handsPanel.zPosition = 20
+        addChild(handsPanel)
         buildWorld()
         say("Vroom vroom! Hold your plate like a steering wheel, and turn it to steer!")
     }
@@ -94,6 +109,11 @@ final class DrivingScene: GameScene {
         addChild(car)
 
         buildWheel()
+        let panelSize = handsPanelSize
+        handsFrame.path = CGPath(roundedRect: CGRect(x: -panelSize.width / 2, y: -panelSize.height / 2,
+                                                     width: panelSize.width, height: panelSize.height),
+                                 cornerWidth: 10, cornerHeight: 10, transform: nil)
+        handsPanel.position = CGPoint(x: size.width - panelSize.width / 2 - 24, y: panelSize.height / 2 + 24)
         scoreLabel.fontSize = size.height * 0.08
         scoreLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.88)
         hintLabel.fontSize = size.height * 0.06
@@ -202,9 +222,11 @@ final class DrivingScene: GameScene {
         let dt = CGFloat(dt)
 
         // Steering
-        if let target = plateSteering(pose) {
+        let reading = plateSteering(pose)
+        showHands(reading)
+        if let reading {
             handsMissing = 0
-            steer += (target - steer) * 0.25
+            steer += (reading.value - steer) * 0.25
         } else {
             handsMissing += Double(dt)
             steer *= 0.9
@@ -237,21 +259,67 @@ final class DrivingScene: GameScene {
         moveItems()
     }
 
-    /// Steering from the tilt of the line between the wrists: right hand lower = turn right.
-    private func plateSteering(_ pose: PoseFrame) -> CGFloat? {
-        let pairs: [(CGPoint, CGPoint)] = pose.bodies.compactMap { body in
-            // Wrists can be hidden behind the plate; elbows tilt the same way, so fall back to them.
-            guard let a = body[.leftWrist] ?? body[.leftElbow], let b = body[.rightWrist] ?? body[.rightElbow] else { return nil }
-            let pa = scenePoint(a, imageSize: pose.imageSize), pb = scenePoint(b, imageSize: pose.imageSize)
-            return pa.x < pb.x ? (pa, pb) : (pb, pa)
+    private struct SteeringReading {
+        var value: CGFloat
+        var left: CGPoint, right: CGPoint // normalized camera coords, for the hands panel
+        var fromHandTracker: Bool
+    }
+
+    /// Steering from the tilt of the line between the two hands: right hand lower = turn right.
+    /// Prefers the dedicated hand tracker (robust up close, plate in front of the body);
+    /// falls back to body wrists, then elbows.
+    private func plateSteering(_ pose: PoseFrame) -> SteeringReading? {
+        var pair: (CGPoint, CGPoint)?
+        var fromHands = false
+        if pose.hands.count >= 2, hypot(pose.hands[0].x - pose.hands[1].x, pose.hands[0].y - pose.hands[1].y) > 0.04 {
+            pair = (pose.hands[0], pose.hands[1])
+            fromHands = true
+        } else {
+            let pairs: [(CGPoint, CGPoint)] = pose.bodies.compactMap { body in
+                guard let a = body[.leftWrist] ?? body[.leftElbow], let b = body[.rightWrist] ?? body[.rightElbow] else { return nil }
+                return (a, b)
+            }
+            // Several people: use the hands farthest apart (whoever is holding the plate out).
+            pair = pairs.max { hypot($0.1.x - $0.0.x, $0.1.y - $0.0.y) < hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
         }
-        // If several people are visible, use the hands that are farthest apart (the one holding the plate).
-        guard let (left, right) = pairs.max(by: { hypot($0.1.x - $0.0.x, $0.1.y - $0.0.y) < hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) })
-        else { return nil }
-        let angle = atan2(right.y - left.y, right.x - left.x)
-        guard abs(angle) > deadZone else { return 0 }
-        let effective = angle > 0 ? angle - deadZone : angle + deadZone
-        return min(max(-effective / (fullLockAngle - deadZone), -1), 1)
+        guard let (a, b) = pair else { return nil }
+        let (left, right) = a.x < b.x ? (a, b) : (b, a)
+
+        // Measure the angle on screen so the camera's aspect ratio doesn't distort it.
+        let pl = scenePoint(left, imageSize: pose.imageSize), pr = scenePoint(right, imageSize: pose.imageSize)
+        let angle = atan2(pr.y - pl.y, pr.x - pl.x)
+        var value: CGFloat = 0
+        if abs(angle) > deadZone {
+            let effective = angle > 0 ? angle - deadZone : angle + deadZone
+            value = min(max(-effective / (fullLockAngle - deadZone), -1), 1)
+        }
+        return SteeringReading(value: value, left: left, right: right, fromHandTracker: fromHands)
+    }
+
+    private var handsPanelSize: CGSize {
+        let w = size.width * 0.16
+        return CGSize(width: w, height: w * 9 / 16)
+    }
+
+    /// Small camera-shaped panel showing where the hands are seen: green = hand tracker, yellow = body.
+    private func showHands(_ reading: SteeringReading?) {
+        guard let reading else {
+            handDots.forEach { $0.isHidden = true }
+            handsLine.path = nil
+            return
+        }
+        let s = handsPanelSize
+        let points = [reading.left, reading.right].map { CGPoint(x: ($0.x - 0.5) * s.width, y: ($0.y - 0.5) * s.height) }
+        let color: NSColor = reading.fromHandTracker ? .systemGreen : .systemYellow
+        for (dot, p) in zip(handDots, points) {
+            dot.isHidden = false
+            dot.position = p
+            dot.fillColor = color
+        }
+        let path = CGMutablePath()
+        path.move(to: points[0])
+        path.addLine(to: points[1])
+        handsLine.path = path
     }
 
     private func scrollRoad() {

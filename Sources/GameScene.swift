@@ -15,6 +15,9 @@ class GameScene: SKScene {
     /// Games that need feet in view get the too-close warning; hands-only games opt out.
     var needsFullBody: Bool { true }
 
+    /// Games that steer with hands turn on the dedicated hand tracker.
+    var wantsHandTracking: Bool { false }
+
     var currentPose: PoseFrame { frameProvider?() ?? PoseFrame() }
 
     private var lastUpdate: TimeInterval = 0
