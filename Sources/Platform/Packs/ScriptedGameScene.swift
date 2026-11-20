@@ -151,7 +151,7 @@ final class ScriptedGameScene: GameScene {
         let node: SKNode
         switch kind {
         case "emoji", "text":
-            let label = SKLabelNode(fontNamed: kind == "text" ? "AvenirNext-Heavy" : "AppleColorEmoji")
+            let label = kind == "text" ? RoundedLabel() : SKLabelNode(fontNamed: "AppleColorEmoji")
             label.verticalAlignmentMode = .center
             label.horizontalAlignmentMode = .center
             node = label
@@ -249,6 +249,7 @@ final class ScriptedGameScene: GameScene {
     }
 
     private func playSound(_ name: String) {
+        guard !Snapshot.isActive else { return }
         let sound: NSSound?
         if let url = pack.resource(name), FileManager.default.fileExists(atPath: url.path) {
             sound = NSSound(contentsOf: url, byReference: false)
@@ -304,7 +305,6 @@ final class ScriptedGameScene: GameScene {
         title.zPosition = 200
         addChild(title)
         let detail = makeLabel(message, size: 0.03)
-        detail.fontName = "Menlo"
         detail.position = CGPoint(x: size.width / 2, y: size.height * 0.46)
         detail.zPosition = 200
         addChild(detail)

@@ -26,7 +26,7 @@ final class DanceMusic {
         songs = Self.melodies.compactMap { Self.render(melody: $0, format: format) }
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: format)
-        engine.mainMixerNode.outputVolume = 0.6
+        engine.mainMixerNode.outputVolume = Snapshot.isActive ? 0 : 0.6
         try? engine.start()
     }
 

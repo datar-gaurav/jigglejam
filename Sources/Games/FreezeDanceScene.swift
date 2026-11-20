@@ -30,10 +30,9 @@ final class FreezeDanceScene: GameScene {
     private var lastSparkle: TimeInterval = 0
 
     private var stars = 0
-    private lazy var scoreLabel = makeLabel("⭐️ 0", size: 0.08)
-    private lazy var bigLabel = makeLabel("", size: 0.16)
-    private lazy var statusLabel = makeLabel("", size: 0.07)
-    private lazy var hintLabel = makeLabel("Come stand in front of the camera! 👋", size: 0.06)
+    private lazy var scorePill = makeScorePill("⭐️ 0")
+    private lazy var bigLabel = makeLabel("", size: 0.12)
+    private lazy var statusPill = HUDPill("")
     private let iceOverlay = SKShapeNode()
 
     override func didMove(to view: SKView) {
@@ -42,8 +41,10 @@ final class FreezeDanceScene: GameScene {
         iceOverlay.strokeColor = .clear
         iceOverlay.alpha = 0
         iceOverlay.zPosition = 3
-        hintLabel.alpha = 0
-        [iceOverlay, scoreLabel, bigLabel, statusLabel, hintLabel].forEach(addChild)
+        statusPill.alpha = 0
+        statusPill.zPosition = 40
+        bigLabel.zPosition = 40
+        [iceOverlay, scorePill, bigLabel, statusPill].forEach(addChild)
         layoutHUD()
     }
 
@@ -51,13 +52,12 @@ final class FreezeDanceScene: GameScene {
 
     private func layoutHUD() {
         iceOverlay.path = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
-        for (label, rel) in [(scoreLabel, 0.08), (bigLabel, 0.16), (statusLabel, 0.07), (hintLabel, 0.06)] {
-            label.fontSize = size.height * rel
-        }
-        scoreLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.88)
-        bigLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.62)
-        statusLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.45)
-        hintLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.3)
+        placeScorePill(scorePill)
+        bigLabel.fontSize = size.height * 0.12
+        // Big words sit high, clear of the player's face; the status pill sits low.
+        bigLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.72)
+        statusPill.height = size.height * 0.085
+        statusPill.position = CGPoint(x: size.width / 2, y: size.height * 0.14)
     }
 
     override func trackingDidResume() {
@@ -92,7 +92,6 @@ final class FreezeDanceScene: GameScene {
 
         let sample = updateMotion(pose) // duration of a fresh motion sample this frame, if any
         let someone = pose.peopleCount > 0
-        hintLabel.alpha += ((someone ? 0 : 1) - hintLabel.alpha) * 0.1
 
         switch phase {
         case .intro(let until):
@@ -111,8 +110,7 @@ final class FreezeDanceScene: GameScene {
         case .freezing(let start, let until):
             if now - start >= reactionGrace, let sample {
                 let still = judge.addSample(motion: motion, duration: sample)
-                statusLabel.text = still ? "🧊 So still!" : "😄 Wiggly!"
-                statusLabel.fontColor = still ? .white : .systemYellow
+                setStatus(still ? "🧊 So still!" : "😄 Wiggly!")
             }
             if now >= until { finishFreeze() }
 
@@ -135,7 +133,7 @@ final class FreezeDanceScene: GameScene {
         lastNudge = now
         music.play(newSong: Bool.random())
         iceOverlay.run(.fadeAlpha(to: 0, duration: 0.3))
-        statusLabel.text = ""
+        setStatus("")
         show("💃 DANCE! 🕺")
         bigLabel.run(.repeatForever(.sequence([.scale(to: 1.1, duration: 0.24), .scale(to: 1, duration: 0.24)])), withKey: "bounce")
     }
@@ -148,7 +146,7 @@ final class FreezeDanceScene: GameScene {
         say(replay ? "I couldn't see you! Freeze again!" : "Freeze!")
         bigLabel.removeAction(forKey: "bounce")
         show("🥶 FREEZE!")
-        statusLabel.text = ""
+        setStatus("")
         iceOverlay.run(.fadeAlpha(to: 0.3, duration: 0.2))
         snow()
     }
@@ -168,18 +166,23 @@ final class FreezeDanceScene: GameScene {
         phase = .result(until: now + 2.2)
         if verdict == .froze {
             stars += 1
-            scoreLabel.text = "⭐️ \(stars)"
-            scoreLabel.run(.sequence([.scale(to: 1.3, duration: 0.1), .scale(to: 1, duration: 0.2)]))
+            scorePill.text = "⭐️ \(stars)"
+            scorePill.pulse()
             show("⭐️ Great freeze!")
-            statusLabel.text = ""
+            setStatus("")
             say(["Great freeze!", "You're a statue!", "Wow, so still!", "Super freeze!"].randomElement()!)
             confetti()
         } else {
             show("😄 So wiggly!")
-            statusLabel.text = "Let's try again!"
-            statusLabel.fontColor = .white
+            setStatus("Let's try again!")
             say("So wiggly! Let's try again!")
         }
+    }
+
+    private func setStatus(_ text: String) {
+        guard statusPill.text != text else { return }
+        statusPill.text = text
+        statusPill.alpha = text.isEmpty ? 0 : 1
     }
 
     private func show(_ text: String) {

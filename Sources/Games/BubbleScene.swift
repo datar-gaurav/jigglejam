@@ -16,11 +16,9 @@ final class BubbleScene: GameScene {
     private var markers: [SKShapeNode] = []
     private var markerKinds: [Popper.Kind] = []
     private var bubbles: [Bubble] = []
-    private let scoreLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-    private let hintLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private lazy var scorePill = makeScorePill("⭐️ 0")
     private var score = 0
     private var spawnTimer: TimeInterval = 0.5
-    private var noBodyTime: TimeInterval = 0
     private var sounds: [NSSound] = []
     private let maxBubbles = 9
 
@@ -29,16 +27,7 @@ final class BubbleScene: GameScene {
     override func didMove(to view: SKView) {
         backgroundColor = .clear
 
-        scoreLabel.fontColor = .white
-        scoreLabel.text = "⭐️ 0"
-        scoreLabel.zPosition = 10
-        addChild(scoreLabel)
-
-        hintLabel.fontColor = .white
-        hintLabel.text = "Come stand in front of the camera! 👋"
-        hintLabel.alpha = 0
-        hintLabel.zPosition = 10
-        addChild(hintLabel)
+        addChild(scorePill)
 
         layoutHUD()
         say("Pop the bubbles!")
@@ -53,10 +42,7 @@ final class BubbleScene: GameScene {
     }
 
     private func layoutHUD() {
-        scoreLabel.fontSize = size.height * 0.08
-        scoreLabel.position = CGPoint(x: size.width / 2, y: size.height - size.height * 0.12)
-        hintLabel.fontSize = size.height * 0.06
-        hintLabel.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        placeScorePill(scorePill)
     }
 
     // MARK: - Loop
@@ -64,7 +50,6 @@ final class BubbleScene: GameScene {
     override func tick(dt: TimeInterval, pose: PoseFrame) {
 
         updateMarkers(pose)
-        updateHint(pose, dt: dt)
 
         spawnTimer -= dt
         if spawnTimer <= 0, pose.peopleCount > 0, bubbles.count < maxBubbles {
@@ -79,12 +64,20 @@ final class BubbleScene: GameScene {
 
     private func makeMarker(kind: Popper.Kind) -> SKShapeNode {
         let r = kind == .hand ? handRadius : handRadius * 0.8
+        let color: NSColor = kind == .hand ? .white : .systemYellow
         let m = SKShapeNode(circleOfRadius: r)
-        m.fillColor = NSColor.white.withAlphaComponent(0.25)
-        m.strokeColor = kind == .hand ? .white : .systemYellow
-        m.lineWidth = 6
+        m.fillColor = color.withAlphaComponent(0.18)
+        m.strokeColor = color
+        m.lineWidth = 5
         m.zPosition = 5
         m.isHidden = true
+        // Soft halo so hands read clearly over any background.
+        let halo = SKShapeNode(circleOfRadius: r * 1.28)
+        halo.fillColor = .clear
+        halo.strokeColor = color.withAlphaComponent(0.28)
+        halo.lineWidth = r * 0.3
+        halo.zPosition = -1
+        m.addChild(halo)
         return m
     }
 
@@ -111,12 +104,6 @@ final class BubbleScene: GameScene {
         for i in pose.poppers.count..<max(markers.count, pose.poppers.count) {
             markers[i].isHidden = true
         }
-    }
-
-    private func updateHint(_ pose: PoseFrame, dt: TimeInterval) {
-        noBodyTime = pose.peopleCount == 0 ? noBodyTime + dt : 0
-        let target: CGFloat = noBodyTime > 1.5 ? 1 : 0
-        hintLabel.alpha += (target - hintLabel.alpha) * 0.1
     }
 
     // MARK: - Bubbles
@@ -178,9 +165,8 @@ final class BubbleScene: GameScene {
         b.removeFromParent()
 
         score += 1
-        scoreLabel.text = "⭐️ \(score)"
-        scoreLabel.removeAction(forKey: "pulse")
-        scoreLabel.run(.sequence([.scale(to: 1.25, duration: 0.08), .scale(to: 1, duration: 0.15)]), withKey: "pulse")
+        scorePill.text = "⭐️ \(score)"
+        scorePill.pulse()
         playPop()
         if score % 10 == 0 { celebrate() }
     }
@@ -221,6 +207,7 @@ final class BubbleScene: GameScene {
     }
 
     private func playPop() {
+        guard !Snapshot.isActive else { return }
         // Keep a small pool so overlapping pops all play.
         guard let sound = NSSound(named: "Pop")?.copy() as? NSSound else { return }
         sounds.append(sound)

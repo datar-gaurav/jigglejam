@@ -356,7 +356,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         return false
     }
 
-    private static func poppers(from body: Body) -> [Popper] {
+    static func poppers(from body: Body) -> [Popper] {
         /// Vision tracks wrists, not palms: nudge past the wrist along the forearm to reach the hand.
         func extend(_ tip: Joint, from base: Joint, by amount: CGFloat) -> CGPoint? {
             guard let t = body[tip] else { return nil }

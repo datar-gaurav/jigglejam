@@ -130,42 +130,85 @@ class GameScene: SKScene {
     private func makeOverlay(for reason: PauseReason) -> SKNode {
         let node = SKNode()
         node.zPosition = 100
+        let h = size.height
 
         let dim = SKShapeNode(rect: CGRect(origin: .zero, size: size))
-        dim.fillColor = NSColor.black.withAlphaComponent(0.6)
+        dim.fillColor = NSColor.black.withAlphaComponent(0.5)
         dim.strokeColor = .clear
         node.addChild(dim)
 
-        let (titleText, subtitleText, icon): (String, String, String)
+        let (titleText, subtitleText, icon, accent): (String, String, String, NSColor)
         switch reason {
         case .tooClose:
-            (titleText, subtitleText, icon) = ("✋ Too close!", "Take a big step back 👣", "🧒")
+            (titleText, subtitleText, icon, accent) = ("Too close!", "Take a big step back 👣", "✋", .systemOrange)
         case .lookingForPlayer(let stalled):
-            (titleText, subtitleText, icon) = stalled
-                ? ("👀 Looking for you…", "The camera stopped. Check the iPhone is close and locked.", "📷")
-                : ("👀 Looking for you…", "Stand where the camera can see you", "🧒")
+            (titleText, subtitleText, icon, accent) = stalled
+                ? ("Looking for you…", "The camera stopped. Check the iPhone is close and locked.", "📷", .systemBlue)
+                : ("Looking for you…", "Stand where the camera can see you", "👀", .systemBlue)
         }
 
-        let title = makeLabel(titleText, size: 0.13)
-        title.position = CGPoint(x: size.width / 2, y: size.height * 0.68)
-        node.addChild(title)
+        let title = RoundedLabel(titleText, size: h * 0.1)
+        let subtitle = RoundedLabel(subtitleText, size: h * 0.042, weight: .semibold)
+        subtitle.fontColor = NSColor.white.withAlphaComponent(0.8)
 
-        let subtitle = makeLabel(subtitleText, size: 0.06)
-        subtitle.position = CGPoint(x: size.width / 2, y: size.height * 0.5)
+        // Card, sized to fit its text.
+        let textWidth = max(title.frame.width, subtitle.frame.width)
+        let cardSize = CGSize(width: min(max(textWidth + h * 0.16, h * 0.9), size.width * 0.92), height: h * 0.5)
+        let cardRect = CGRect(x: (size.width - cardSize.width) / 2, y: (h - cardSize.height) / 2 - h * 0.02,
+                              width: cardSize.width, height: cardSize.height)
+        let card = SKShapeNode(path: CGPath(roundedRect: cardRect, cornerWidth: h * 0.05, cornerHeight: h * 0.05, transform: nil))
+        card.fillColor = NSColor(white: 0.08, alpha: 0.85)
+        card.strokeColor = NSColor.white.withAlphaComponent(0.14)
+        card.lineWidth = 2
+        node.addChild(card)
+
+        // Icon badge, half outside the top of the card
+        let badgeRadius = h * 0.085
+        let badgeCenter = CGPoint(x: size.width / 2, y: cardRect.maxY)
+        let halo = SKShapeNode(circleOfRadius: badgeRadius * 1.35)
+        halo.fillColor = accent.withAlphaComponent(0.3)
+        halo.strokeColor = .clear
+        halo.position = badgeCenter
+        node.addChild(halo)
+        let badge = SKShapeNode(circleOfRadius: badgeRadius)
+        badge.fillColor = accent
+        badge.strokeColor = NSColor.white.withAlphaComponent(0.5)
+        badge.lineWidth = 3
+        badge.position = badgeCenter
+        node.addChild(badge)
+        let iconLabel = RoundedLabel(icon, size: badgeRadius * 1.05)
+        iconLabel.shadowed = false
+        iconLabel.position = badgeCenter
+        node.addChild(iconLabel)
+        halo.run(.repeatForever(.sequence([.scale(to: 1.15, duration: 0.8), .scale(to: 1, duration: 0.8)])))
+
+        title.position = CGPoint(x: size.width / 2, y: cardRect.midY + h * 0.03)
+        node.addChild(title)
+        subtitle.position = CGPoint(x: size.width / 2, y: cardRect.midY - h * 0.075)
         node.addChild(subtitle)
 
-        let figure = makeLabel(icon, size: 0.16)
-        figure.position = CGPoint(x: size.width / 2, y: size.height * 0.27)
-        node.addChild(figure)
         if case .tooClose = reason {
             // A kid shrinking into the distance = "move back".
-            figure.run(.repeatForever(.sequence([
-                .group([.scale(to: 0.45, duration: 1.0), .fadeAlpha(to: 0.6, duration: 1.0)]),
+            let kid = RoundedLabel("🧒", size: h * 0.09)
+            kid.position = CGPoint(x: size.width / 2, y: cardRect.minY + h * 0.07)
+            node.addChild(kid)
+            kid.run(.repeatForever(.sequence([
+                .group([.scale(to: 0.5, duration: 1.0), .fadeAlpha(to: 0.5, duration: 1.0)]),
                 .wait(forDuration: 0.3),
                 .group([.scale(to: 1, duration: 0), .fadeAlpha(to: 1, duration: 0)])
             ])))
         } else {
-            figure.run(.repeatForever(.sequence([.moveBy(x: -30, y: 0, duration: 0.6), .moveBy(x: 30, y: 0, duration: 0.6)])))
+            // Three dots "searching".
+            for i in 0..<3 {
+                let dot = SKShapeNode(circleOfRadius: h * 0.012)
+                dot.fillColor = .white
+                dot.strokeColor = .clear
+                dot.position = CGPoint(x: size.width / 2 + CGFloat(i - 1) * h * 0.04, y: cardRect.minY + h * 0.07)
+                dot.alpha = 0.3
+                node.addChild(dot)
+                dot.run(.sequence([.wait(forDuration: Double(i) * 0.2),
+                                   .repeatForever(.sequence([.fadeAlpha(to: 1, duration: 0.3), .fadeAlpha(to: 0.3, duration: 0.3), .wait(forDuration: 0.3)]))]))
+            }
         }
         return node
     }
@@ -178,6 +221,7 @@ class GameScene: SKScene {
     }
 
     func say(_ text: String) {
+        guard !Snapshot.isActive else { return }
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = 0.45
         utterance.pitchMultiplier = 1.25
@@ -185,28 +229,34 @@ class GameScene: SKScene {
         speech.speak(utterance)
     }
 
+    /// Rounded, shadowed text sized relative to the scene height. Also used for emoji sprites.
     func makeLabel(_ text: String, size relative: CGFloat) -> SKLabelNode {
-        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        label.text = text
-        label.fontColor = .white
-        label.fontSize = size.height * relative
-        label.verticalAlignmentMode = .center
+        let label = RoundedLabel(text, size: size.height * relative)
         label.zPosition = 10
         return label
     }
 
     func confetti(count: Int = 50) {
-        for _ in 0..<count {
-            let piece = SKShapeNode(rectOf: CGSize(width: size.height * 0.015, height: size.height * 0.03), cornerRadius: 2)
+        let unit = size.height * 0.016
+        for i in 0..<count {
+            let piece: SKShapeNode
+            switch i % 3 {
+            case 0: piece = SKShapeNode(rectOf: CGSize(width: unit, height: unit * 2), cornerRadius: unit * 0.3)
+            case 1: piece = SKShapeNode(circleOfRadius: unit * 0.7)
+            default: piece = SKShapeNode(rectOf: CGSize(width: unit * 2.4, height: unit * 0.7), cornerRadius: unit * 0.35)
+            }
             piece.fillColor = palette.randomElement()!
             piece.strokeColor = .clear
             piece.position = CGPoint(x: .random(in: 0...size.width), y: size.height + 20)
-            piece.zPosition = 8
+            piece.zPosition = 80
             addChild(piece)
             let fall = TimeInterval.random(in: 1.8...3.2)
+            let sway = SKAction.sequence([.moveBy(x: 30, y: 0, duration: 0.4), .moveBy(x: -30, y: 0, duration: 0.4)])
             piece.run(.sequence([
                 .group([.moveBy(x: .random(in: -80...80), y: -size.height - 60, duration: fall),
-                        .rotate(byAngle: .random(in: -8...8), duration: fall)]),
+                        .rotate(byAngle: .random(in: -8...8), duration: fall),
+                        .repeat(sway, count: Int(fall / 0.8) + 1),
+                        .sequence([.wait(forDuration: fall * 0.7), .fadeOut(withDuration: fall * 0.3)])]),
                 .removeFromParent()
             ]))
         }

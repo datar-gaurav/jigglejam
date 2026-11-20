@@ -43,7 +43,7 @@ final class FoxTrailScene: GameScene {
     private enum Practice { case march, jump, done }
     private var practice: Practice = .march
     private let practiceWalkDistance: CGFloat = 1.2
-    private lazy var coachLabel = makeLabel("🚶 March to walk!", size: 0.09)
+    private lazy var coachPill = HUDPill("🚶 March to walk!", tint: .systemPurple)
 
     private var crates: [Crate] = []
     private var fruits: [Fruit] = []
@@ -53,8 +53,8 @@ final class FoxTrailScene: GameScene {
     private let world = SKNode()       // moves with the fox
     private let backdrop = SKNode()    // parallax layers
     private lazy var fox = makeLabel("🦊", size: 0.13)
-    private lazy var fruitLabel = makeLabel("🍎 0", size: 0.08)
-    private lazy var levelLabel = makeLabel("Level 1", size: 0.045)
+    private lazy var fruitPill = makeScorePill("🍎 0")
+    private lazy var levelPill = HUDPill("Level 1")
     private lazy var jumpHint = makeLabel("⬆️", size: 0.09)
     private var sounds: [NSSound] = []
 
@@ -82,10 +82,11 @@ final class FoxTrailScene: GameScene {
         addChild(world)
         world.addChild(fox)
         world.addChild(jumpHint)
-        addChild(fruitLabel)
-        addChild(levelLabel)
-        coachLabel.zPosition = 20
-        addChild(coachLabel)
+        levelPill.zPosition = 40
+        coachPill.zPosition = 40
+        addChild(fruitPill)
+        addChild(levelPill)
+        addChild(coachPill)
         buildLevel()
         say("Fox Trail! Let's practice. March your legs to walk!")
     }
@@ -98,17 +99,19 @@ final class FoxTrailScene: GameScene {
     private func buildLevel(keepPosition: Bool = false) {
         world.children.filter { $0 !== fox && $0 !== jumpHint }.forEach { $0.removeFromParent() }
         backdrop.removeAllChildren()
+        backdrop.addChild(makeGradientBackdrop(top: NSColor(calibratedRed: 0.36, green: 0.7, blue: 1, alpha: 1),
+                                               bottom: NSColor(calibratedRed: 0.8, green: 0.93, blue: 1, alpha: 1)))
         scenery.removeAll()
         if !keepPosition {
             foxX = 0; foxY = 0; velocityY = 0; walkSpeed = 0
             fruits.removeAll()
             crates = makeCrates()
         }
-        fruitLabel.fontSize = H * 0.08
-        fruitLabel.position = CGPoint(x: size.width / 2, y: H * 0.9)
-        levelLabel.fontSize = H * 0.045
-        levelLabel.position = CGPoint(x: size.width * 0.08, y: H * 0.93)
-        levelLabel.text = "Level \(level)"
+        placeScorePill(fruitPill)
+        levelPill.height = H * 0.06
+        levelPill.text = "Level \(level)"
+        // Left side, clear of the close button in the top-left corner.
+        levelPill.position = CGPoint(x: 96 + levelPill.calculateAccumulatedFrame().width / 2, y: H - H * 0.085)
         fox.fontSize = H * 0.13
 
         let length = goalX + 4
@@ -303,8 +306,8 @@ final class FoxTrailScene: GameScene {
         fruits.removeAll { fruit in
             guard hypot(fruit.x - cx, fruit.y - cy) < 0.1 else { return false }
             fruitCount += 1
-            fruitLabel.text = "🍎 \(fruitCount)"
-            fruitLabel.run(.sequence([.scale(to: 1.25, duration: 0.08), .scale(to: 1, duration: 0.15)]))
+            fruitPill.text = "🍎 \(fruitCount)"
+            fruitPill.pulse()
             play("Glass")
             fruit.node.removeAllActions()
             fruit.node.run(.sequence([.group([.scale(to: 1.8, duration: 0.2), .fadeOut(withDuration: 0.2)]), .removeFromParent()]))
@@ -314,11 +317,11 @@ final class FoxTrailScene: GameScene {
     }
 
     private func updatePractice(jumped: Bool) {
-        coachLabel.position = CGPoint(x: size.width / 2, y: H * 0.72)
-        coachLabel.fontSize = H * 0.09
+        coachPill.position = CGPoint(x: size.width / 2, y: H * 0.72)
+        if coachPill.height != H * 0.1 { coachPill.height = H * 0.1 }
         switch practice {
         case .march:
-            if level > 1 { practice = .done; coachLabel.alpha = 0; return }
+            if level > 1 { practice = .done; coachPill.alpha = 0; return }
             if foxX > practiceWalkDistance {
                 practice = .jump
                 coach("⬆️ Now jump!")
@@ -328,7 +331,7 @@ final class FoxTrailScene: GameScene {
             if jumped {
                 practice = .done
                 coach("🎉 Great jumping!")
-                coachLabel.run(.sequence([.wait(forDuration: 2), .fadeOut(withDuration: 0.5)]))
+                coachPill.run(.sequence([.wait(forDuration: 2), .fadeOut(withDuration: 0.5)]))
                 say("Great jumping! Now let's go! Jump over the boxes!")
             }
         case .done:
@@ -337,11 +340,11 @@ final class FoxTrailScene: GameScene {
     }
 
     private func coach(_ text: String) {
-        coachLabel.removeAllActions()
-        coachLabel.alpha = 1
-        coachLabel.text = text
-        coachLabel.setScale(0.5)
-        coachLabel.run(.scale(to: 1, duration: 0.2))
+        coachPill.removeAllActions()
+        coachPill.alpha = 1
+        coachPill.text = text
+        coachPill.setScale(0.5)
+        coachPill.run(.scale(to: 1, duration: 0.2))
     }
 
     private func nudges(dt: TimeInterval, pose: PoseFrame) {
@@ -366,7 +369,7 @@ final class FoxTrailScene: GameScene {
         say("Hooray! Fox made it home!")
         confetti(count: 70)
         play("Hero")
-        let banner = makeLabel("🎉 Level \(level) done!", size: 0.12)
+        let banner = makeBanner("🎉 Level \(level) done!", color: .systemPurple)
         banner.position = CGPoint(x: size.width / 2, y: H * 0.6)
         banner.zPosition = 30
         addChild(banner)
@@ -401,6 +404,7 @@ final class FoxTrailScene: GameScene {
     }
 
     private func play(_ name: String) {
+        guard !Snapshot.isActive else { return }
         guard let sound = NSSound(named: name)?.copy() as? NSSound else { return }
         sounds.append(sound)
         if sounds.count > 4 { sounds.removeFirst() }

@@ -7,6 +7,8 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
 <p align="center">
   <img src="docs/screenshots/menu.jpg" width="49%" alt="Jiggle Jam menu: colorful game cards with a status pill and a control bar">
   <img src="docs/screenshots/setup.jpg" width="49%" alt="Setup screen: big instruction with a checklist of hands, feet and distance">
+  <img src="docs/screenshots/game-fox-trail.jpg" width="49%" alt="Fox Trail: a fox on a grassy trail with a level pill, fruit score pill and a coaching banner">
+  <img src="docs/screenshots/overlay-too-close.jpg" width="49%" alt="Too close card asking the player to take a big step back">
 </p>
 
 <sub>Screenshots use a placeholder where the live camera appears. Regenerate them with

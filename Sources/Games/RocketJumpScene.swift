@@ -19,8 +19,8 @@ final class RocketJumpScene: GameScene {
     private var lastNudge: TimeInterval = 0
     private var sounds: [NSSound] = []
 
-    private lazy var totalLabel = makeLabel("🦘 0", size: 0.08)
-    private lazy var promptLabel = makeLabel("JUMP! 🦘", size: 0.14)
+    private lazy var totalPill = makeScorePill("🦘 0")
+    private lazy var promptLabel = makeLabel("JUMP! 🦘", size: 0.12)
     private lazy var rocket = makeLabel("🚀", size: 0.11)
     private lazy var destination = makeLabel("", size: 0.12)
     private let track = SKShapeNode()
@@ -39,7 +39,7 @@ final class RocketJumpScene: GameScene {
         track.strokeColor = NSColor.white.withAlphaComponent(0.35)
         track.lineWidth = 6
         track.zPosition = 2
-        [track, rocket, destination, totalLabel, promptLabel].forEach(addChild)
+        [track, rocket, destination, totalPill, promptLabel].forEach(addChild)
         promptLabel.run(.repeatForever(.sequence([.scale(to: 1.12, duration: 0.3), .scale(to: 1, duration: 0.3)])))
         layoutHUD()
         say("Rocket Jump! Jump to fly the rocket to the Moon!")
@@ -48,11 +48,11 @@ final class RocketJumpScene: GameScene {
     override func didChangeSize(_ oldSize: CGSize) { layoutHUD() }
 
     private func layoutHUD() {
-        for (label, rel) in [(totalLabel, 0.08), (promptLabel, 0.14), (rocket, 0.11), (destination, 0.12)] {
+        placeScorePill(totalPill)
+        for (label, rel) in [(promptLabel, 0.12), (rocket, 0.11), (destination, 0.12)] {
             label.fontSize = size.height * rel
         }
-        totalLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.88)
-        promptLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.62)
+        promptLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.72)
 
         let path = CGMutablePath()
         path.move(to: CGPoint(x: trackX, y: trackBottom))
@@ -107,8 +107,8 @@ final class RocketJumpScene: GameScene {
 
     private func jumped(body: Body, imageSize: CGSize) {
         totalJumps += 1
-        totalLabel.text = "🦘 \(totalJumps)"
-        totalLabel.run(.sequence([.scale(to: 1.25, duration: 0.08), .scale(to: 1, duration: 0.15)]))
+        totalPill.text = "🦘 \(totalJumps)"
+        totalPill.pulse()
         playBoing()
         if let ankle = body[.leftAnkle] ?? body[.rightAnkle] ?? body[.root] {
             stomp(at: scenePoint(ankle, imageSize: imageSize))
@@ -140,8 +140,8 @@ final class RocketJumpScene: GameScene {
             .wait(forDuration: 2.5),
             .run { [weak self] in self?.nextTrip() }
         ]))
-        let banner = makeLabel("🎉 \(place.emoji) You made it!", size: 0.11)
-        banner.position = CGPoint(x: size.width / 2, y: size.height * 0.5)
+        let banner = makeBanner("🎉 \(place.emoji) You made it!", color: .systemOrange)
+        banner.position = CGPoint(x: size.width / 2, y: size.height * 0.55)
         addChild(banner)
         banner.setScale(0.3)
         banner.run(.sequence([.scale(to: 1, duration: 0.3), .wait(forDuration: 3.5), .fadeOut(withDuration: 0.4), .removeFromParent()]))
@@ -189,6 +189,7 @@ final class RocketJumpScene: GameScene {
     }
 
     private func playBoing() {
+        guard !Snapshot.isActive else { return }
         guard let sound = NSSound(named: "Bottle")?.copy() as? NSSound else { return }
         sounds.append(sound)
         if sounds.count > 4 { sounds.removeFirst() }

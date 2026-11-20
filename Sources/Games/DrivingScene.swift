@@ -75,8 +75,9 @@ final class DrivingScene: GameScene {
     private let handsFrame = SKShapeNode()
     private let handsLine = SKShapeNode()
     private let handDots = [SKShapeNode(circleOfRadius: 7), SKShapeNode(circleOfRadius: 7)]
-    private lazy var scoreLabel = makeLabel("⭐️ 0", size: 0.08)
-    private lazy var hintLabel = makeLabel("Hold your plate up with both hands 🍽️", size: 0.06)
+    private lazy var scorePill = makeScorePill("⭐️ 0")
+    private lazy var hintPill = HUDPill("🍽️ Hold your plate up with both hands")
+    private var field: SKSpriteNode?
 
     private var roadWidth: CGFloat { size.width * 0.42 }
     private var segmentHeight: CGFloat { size.height / 20 }
@@ -86,10 +87,10 @@ final class DrivingScene: GameScene {
 
     override func didMove(to view: SKView) {
         backgroundColor = NSColor(calibratedRed: 0.36, green: 0.72, blue: 0.33, alpha: 1)
-        scoreLabel.zPosition = 20
-        hintLabel.zPosition = 20
-        addChild(scoreLabel)
-        addChild(hintLabel)
+        hintPill.zPosition = 40
+        hintPill.alpha = 0
+        addChild(scorePill)
+        addChild(hintPill)
         addChild(wheel)
         handsFrame.fillColor = NSColor.black.withAlphaComponent(0.35)
         handsFrame.strokeColor = NSColor.white.withAlphaComponent(0.6)
@@ -110,6 +111,11 @@ final class DrivingScene: GameScene {
     }
 
     private func buildWorld() {
+        field?.removeFromParent()
+        let grass = makeGradientBackdrop(top: NSColor(calibratedRed: 0.5, green: 0.82, blue: 0.4, alpha: 1),
+                                         bottom: NSColor(calibratedRed: 0.27, green: 0.62, blue: 0.3, alpha: 1))
+        addChild(grass)
+        field = grass
         segments.forEach { $0.node.removeFromParent() }
         items.forEach { $0.node.removeFromParent() }
         items.removeAll()
@@ -134,15 +140,15 @@ final class DrivingScene: GameScene {
                                                      width: panelSize.width, height: panelSize.height),
                                  cornerWidth: 10, cornerHeight: 10, transform: nil)
         handsPanel.position = CGPoint(x: size.width - panelSize.width / 2 - 24, y: panelSize.height / 2 + 24)
-        scoreLabel.fontSize = size.height * 0.08
-        scoreLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.88)
-        hintLabel.fontSize = size.height * 0.06
-        hintLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.62)
+        placeScorePill(scorePill)
+        hintPill.height = size.height * 0.075
+        hintPill.position = CGPoint(x: size.width / 2, y: size.height * 0.62)
     }
 
     private func makeSegment() -> Segment {
-        let h = segmentHeight + 2
-        let dash = SKShapeNode(rectOf: CGSize(width: size.width * 0.008, height: h * 0.6))
+        // Strips overlap generously so no seams show when they're tilted along curves.
+        let h = segmentHeight * 1.4
+        let dash = SKShapeNode(rectOf: CGSize(width: size.width * 0.008, height: segmentHeight * 0.6))
         dash.fillColor = .systemYellow
         dash.strokeColor = .clear
         let seg = Segment(dash: dash)
@@ -167,6 +173,12 @@ final class DrivingScene: GameScene {
         let w = size.width * 0.06, h = w * 1.7
         let node = SKNode()
         node.zPosition = 10
+        let shadow = SKShapeNode(rectOf: CGSize(width: w * 1.25, height: h * 1.05), cornerRadius: w * 0.35)
+        shadow.fillColor = NSColor.black.withAlphaComponent(0.28)
+        shadow.strokeColor = .clear
+        shadow.position = CGPoint(x: w * 0.08, y: -h * 0.06)
+        shadow.zPosition = -1
+        node.addChild(shadow)
         for (x, y) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] as [(CGFloat, CGFloat)] {
             let tire = SKShapeNode(rectOf: CGSize(width: w * 0.24, height: h * 0.24), cornerRadius: 3)
             tire.fillColor = .black
@@ -274,7 +286,7 @@ final class DrivingScene: GameScene {
             steerTarget *= 0.95
         }
         steer += (steerTarget - steer) * (1 - exp(-dt / 0.06))
-        hintLabel.alpha += ((handsMissing > 1 ? 1 : 0) - hintLabel.alpha) * 0.1
+        hintPill.alpha += ((handsMissing > 1 ? 1 : 0) - hintPill.alpha) * 0.1
         wheel.zRotation = -steer * fullLockAngle
         wheel.alpha = handsMissing > 0.5 ? 0.4 : 1
 
@@ -397,6 +409,10 @@ final class DrivingScene: GameScene {
                 seg.d += span
             }
             seg.node.position = CGPoint(x: roadCenter(at: seg.d), y: screenY(seg.d))
+            // Tilt each strip along the curve so the edges look smooth instead of stair-stepped.
+            let step: CGFloat = 0.02
+            let slope = (roadCenter(at: seg.d + step) - roadCenter(at: seg.d - step)) / (2 * step * size.height)
+            seg.node.zRotation = -atan(slope)
         }
     }
 
@@ -468,8 +484,8 @@ final class DrivingScene: GameScene {
 
     private func collect(_ star: SKNode) {
         stars += 1
-        scoreLabel.text = "⭐️ \(stars)"
-        scoreLabel.run(.sequence([.scale(to: 1.25, duration: 0.08), .scale(to: 1, duration: 0.15)]))
+        scorePill.text = "⭐️ \(stars)"
+        scorePill.pulse()
         play("Glass")
         let pos = star.position
         star.removeFromParent()
@@ -506,6 +522,7 @@ final class DrivingScene: GameScene {
     }
 
     private func play(_ name: String) {
+        guard !Snapshot.isActive else { return }
         guard let sound = NSSound(named: name)?.copy() as? NSSound else { return }
         sounds.append(sound)
         if sounds.count > 4 { sounds.removeFirst() }
