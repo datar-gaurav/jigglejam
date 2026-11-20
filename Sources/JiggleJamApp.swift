@@ -73,6 +73,7 @@ struct GameView: View {
     let onExit: () -> Void
     @State private var scene: GameScene
     @State private var showStats = false
+    @AppStorage("warnTooClose") private var warnTooClose = true
 
     init(camera: CameraManager, game: Game, onExit: @escaping () -> Void) {
         self.camera = camera
@@ -110,7 +111,9 @@ struct GameView: View {
         .onAppear {
             let camera = camera
             scene.frameProvider = { camera.latestFrame }
+            scene.distanceWarningEnabled = warnTooClose
         }
+        .onChange(of: warnTooClose) { _, on in scene.distanceWarningEnabled = on }
         .onDisappear { scene.tearDown() }
     }
 }
@@ -120,6 +123,7 @@ struct GameView: View {
 struct MenuView: View {
     @ObservedObject var camera: CameraManager
     let onPlay: (Game) -> Void
+    @AppStorage("warnTooClose") private var warnTooClose = true
 
     var body: some View {
         ZStack {
@@ -162,6 +166,9 @@ struct MenuView: View {
                     .frame(width: 340)
 
                     Button("Refresh") { camera.refreshDevices() }
+                    Toggle("Warn when too close", isOn: $warnTooClose)
+                        .toggleStyle(.switch)
+                        .foregroundStyle(.white)
                     Button("Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
                 }
 
@@ -204,6 +211,7 @@ struct MenuView: View {
     }
 
     private var statusText: String {
+        if warnTooClose && camera.tooClose { return "✋ Too close — take a big step back" }
         switch camera.peopleCount {
         case 0: return "👀 Looking for players… stand back so the camera sees your whole body"
         case 1: return "✅ I can see you!"

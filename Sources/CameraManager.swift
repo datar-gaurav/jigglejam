@@ -20,6 +20,8 @@ struct PoseFrame {
     var poppers: [Popper] = []
     var bodies: [Body] = []
     var peopleCount = 0
+    /// Someone is so close to the camera that their whole body no longer fits.
+    var tooClose = false
     var imageSize = CGSize(width: 1280, height: 720)
     /// Camera timestamp in seconds; changes only when a new camera frame was analysed.
     var timestamp: Double = 0
@@ -38,6 +40,7 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var currentDeviceID: String?
     @Published private(set) var authorization = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var peopleCount = 0
+    @Published private(set) var tooClose = false
     /// e.g. "1280×720 · 30 fps · tracking 14 ms" — shown in the menu to diagnose lag.
     @Published private(set) var stats = ""
 
@@ -48,6 +51,7 @@ final class CameraManager: NSObject, ObservableObject {
     private let lock = NSLock()
     private var frame = PoseFrame()
     private var lastPeopleCount = 0 // videoQueue only
+    private var lastTooClose = false // videoQueue only
     private var statFrames = 0, statTrackingTime = 0.0, statStart = CACurrentMediaTime() // videoQueue only
     private var configured = false
     private var observers: [NSObjectProtocol] = []
@@ -197,10 +201,17 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             poppers: bodies.flatMap(Self.poppers(from:)),
             bodies: bodies,
             peopleCount: people.count,
+            tooClose: bodies.contains(where: Self.isTooClose),
             imageSize: size,
             timestamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         )
         lock.lock(); frame = next; lock.unlock()
+
+        if next.tooClose != lastTooClose {
+            lastTooClose = next.tooClose
+            let close = next.tooClose
+            DispatchQueue.main.async { self.tooClose = close }
+        }
 
         if people.count != lastPeopleCount {
             lastPeopleCount = people.count
@@ -227,6 +238,20 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             body[joint] = CGPoint(x: 1 - p.location.x, y: p.location.y) // mirror so it feels like a mirror
         }
         return body
+    }
+
+    /// Too close when only the upper body is visible, or the shoulders/torso fill too much of the frame.
+    /// Tuning: raise the numbers to allow standing closer.
+    private static func isTooClose(_ body: Body) -> Bool {
+        let hasShoulders = body[.leftShoulder] != nil || body[.rightShoulder] != nil
+        guard hasShoulders else { return false }
+        let noAnkles = body[.leftAnkle] == nil && body[.rightAnkle] == nil
+        let noKnees = body[.leftKnee] == nil && body[.rightKnee] == nil
+        if noAnkles && noKnees { return true }
+
+        if let l = body[.leftShoulder], let r = body[.rightShoulder], abs(l.x - r.x) > 0.22 { return true }
+        if noAnkles, let neck = body[.neck], let root = body[.root], neck.y - root.y > 0.30 { return true }
+        return false
     }
 
     private static func poppers(from body: Body) -> [Popper] {

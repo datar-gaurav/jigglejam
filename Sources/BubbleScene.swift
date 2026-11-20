@@ -19,7 +19,6 @@ final class BubbleScene: GameScene {
     private let scoreLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let hintLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private var score = 0
-    private var lastUpdate: TimeInterval = 0
     private var spawnTimer: TimeInterval = 0.5
     private var noBodyTime: TimeInterval = 0
     private var sounds: [NSSound] = []
@@ -62,10 +61,7 @@ final class BubbleScene: GameScene {
 
     // MARK: - Loop
 
-    override func update(_ currentTime: TimeInterval) {
-        let dt = lastUpdate == 0 ? 1.0 / 60 : min(currentTime - lastUpdate, 1.0 / 20)
-        lastUpdate = currentTime
-        let pose = currentPose
+    override func tick(dt: TimeInterval, pose: PoseFrame) {
 
         updateMarkers(pose)
         updateHint(pose, dt: dt)

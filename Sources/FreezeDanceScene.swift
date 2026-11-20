@@ -20,7 +20,6 @@ final class FreezeDanceScene: GameScene {
     private let music = DanceMusic()
     private var phase: Phase = .intro(until: 0)
     private var now: TimeInterval = 0
-    private var lastUpdate: TimeInterval = 0
 
     private var motion: CGFloat = 0
     private var previousBodies: [Body] = []
@@ -62,6 +61,14 @@ final class FreezeDanceScene: GameScene {
         hintLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.3)
     }
 
+    override func distancePauseChanged(paused: Bool) {
+        if paused {
+            music.stop()
+        } else if case .dancing = phase {
+            music.play()
+        }
+    }
+
     override func tearDown() {
         music.shutdown()
         super.tearDown()
@@ -69,13 +76,10 @@ final class FreezeDanceScene: GameScene {
 
     // MARK: - Loop
 
-    override func update(_ currentTime: TimeInterval) {
-        let dt = lastUpdate == 0 ? 1.0 / 60 : min(currentTime - lastUpdate, 1.0 / 20)
-        lastUpdate = currentTime
+    override func tick(dt: TimeInterval, pose: PoseFrame) {
         now += dt
         if case .intro(until: 0) = phase { startIntro() }
 
-        let pose = currentPose
         updateMotion(pose)
         let someone = pose.peopleCount > 0
         hintLabel.alpha += ((someone ? 0 : 1) - hintLabel.alpha) * 0.1

@@ -9,7 +9,100 @@ class GameScene: SKScene {
     let palette: [NSColor] = [.systemPink, .systemTeal, .systemYellow, .systemGreen, .systemPurple, .systemOrange, .systemBlue]
     private let speech = AVSpeechSynthesizer()
 
+    /// When on, the game pauses with a "step back" warning if a player gets too close.
+    var distanceWarningEnabled = true
+
     var currentPose: PoseFrame { frameProvider?() ?? PoseFrame() }
+
+    private var lastUpdate: TimeInterval = 0
+    private var closeTime: TimeInterval = 0
+    private var farTime: TimeInterval = 0
+    private var lastWarningSpeech: TimeInterval = 0
+    private var clock: TimeInterval = 0
+    private(set) var pausedForDistance = false
+    private var warning: SKNode?
+
+    // MARK: - Loop
+
+    /// Subclasses put their game logic in `tick`, which doesn't run while paused for distance.
+    override func update(_ currentTime: TimeInterval) {
+        let dt = lastUpdate == 0 ? 1.0 / 60 : min(currentTime - lastUpdate, 1.0 / 20)
+        lastUpdate = currentTime
+        clock += dt
+        let pose = currentPose
+        updateDistance(pose, dt: dt)
+        if !pausedForDistance { tick(dt: dt, pose: pose) }
+    }
+
+    func tick(dt: TimeInterval, pose: PoseFrame) {}
+
+    /// Hook for games with extra state to pause, such as music.
+    func distancePauseChanged(paused: Bool) {}
+
+    // MARK: - Too close
+
+    private func updateDistance(_ pose: PoseFrame, dt: TimeInterval) {
+        if distanceWarningEnabled && pose.tooClose {
+            closeTime += dt; farTime = 0
+        } else {
+            farTime += dt; closeTime = 0
+        }
+        if !pausedForDistance && closeTime > 0.5 {
+            setPausedForDistance(true)
+        } else if pausedForDistance && farTime > 1.0 {
+            setPausedForDistance(false)
+        }
+        if pausedForDistance && clock - lastWarningSpeech > 6 {
+            lastWarningSpeech = clock
+            say(["Whoa, too close! Take a big step back!", "Back up, back up! I can't see your feet!"].randomElement()!)
+        }
+    }
+
+    private func setPausedForDistance(_ paused: Bool) {
+        pausedForDistance = paused
+        for child in children where child !== warning { child.isPaused = paused }
+        if paused {
+            let node = makeWarning()
+            warning = node
+            addChild(node)
+            node.alpha = 0
+            node.run(.fadeIn(withDuration: 0.2))
+        } else {
+            warning?.run(.sequence([.fadeOut(withDuration: 0.2), .removeFromParent()]))
+            warning = nil
+            say("Perfect! Let's play!")
+        }
+        distancePauseChanged(paused: paused)
+    }
+
+    private func makeWarning() -> SKNode {
+        let node = SKNode()
+        node.zPosition = 100
+
+        let dim = SKShapeNode(rect: CGRect(origin: .zero, size: size))
+        dim.fillColor = NSColor.black.withAlphaComponent(0.6)
+        dim.strokeColor = .clear
+        node.addChild(dim)
+
+        let title = makeLabel("✋ Too close!", size: 0.13)
+        title.position = CGPoint(x: size.width / 2, y: size.height * 0.68)
+        node.addChild(title)
+
+        let subtitle = makeLabel("Take a big step back 👣", size: 0.07)
+        subtitle.position = CGPoint(x: size.width / 2, y: size.height * 0.5)
+        node.addChild(subtitle)
+
+        // A kid shrinking into the distance = "move back".
+        let kid = makeLabel("🧒", size: 0.16)
+        kid.position = CGPoint(x: size.width / 2, y: size.height * 0.27)
+        node.addChild(kid)
+        kid.run(.repeatForever(.sequence([
+            .group([.scale(to: 0.45, duration: 1.0), .fadeAlpha(to: 0.6, duration: 1.0)]),
+            .wait(forDuration: 0.3),
+            .group([.scale(to: 1, duration: 0), .fadeAlpha(to: 1, duration: 0)])
+        ])))
+        return node
+    }
 
     /// Maps a normalized camera point to the scene, matching the preview's aspect-fill crop.
     func scenePoint(_ p: CGPoint, imageSize: CGSize) -> CGPoint {
