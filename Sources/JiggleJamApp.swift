@@ -72,6 +72,7 @@ struct GameView: View {
     @ObservedObject var camera: CameraManager
     let onExit: () -> Void
     @State private var scene: GameScene
+    @State private var showStats = false
 
     init(camera: CameraManager, game: Game, onExit: @escaping () -> Void) {
         self.camera = camera
@@ -82,7 +83,21 @@ struct GameView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             CameraPreview(session: camera.session).ignoresSafeArea()
-            SpriteView(scene: scene, options: [.allowsTransparency]).ignoresSafeArea()
+            SpriteView(scene: scene, preferredFramesPerSecond: 60, options: [.allowsTransparency, .ignoresSiblingOrder],
+                       debugOptions: showStats ? [.showsFPS, .showsNodeCount] : [])
+                .ignoresSafeArea()
+            if showStats {
+                Text(camera.stats)
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(8)
+                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(24)
+            }
+            Button("") { showStats.toggle() }
+                .keyboardShortcut("d", modifiers: [])
+                .opacity(0)
             Button(action: onExit) {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 30))
             }
@@ -148,6 +163,12 @@ struct MenuView: View {
 
                     Button("Refresh") { camera.refreshDevices() }
                     Button("Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                }
+
+                if !camera.stats.isEmpty {
+                    Text(camera.stats)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
                 }
 
                 if camera.authorization == .authorized && !camera.hasIPhone {

@@ -38,6 +38,8 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var currentDeviceID: String?
     @Published private(set) var authorization = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var peopleCount = 0
+    /// e.g. "1280×720 · 30 fps · tracking 14 ms" — shown in the menu to diagnose lag.
+    @Published private(set) var stats = ""
 
     private let sessionQueue = DispatchQueue(label: "jigglejam.session")
     private let videoQueue = DispatchQueue(label: "jigglejam.video", qos: .userInteractive)
@@ -46,6 +48,7 @@ final class CameraManager: NSObject, ObservableObject {
     private let lock = NSLock()
     private var frame = PoseFrame()
     private var lastPeopleCount = 0 // videoQueue only
+    private var statFrames = 0, statTrackingTime = 0.0, statStart = CACurrentMediaTime() // videoQueue only
     private var configured = false
     private var observers: [NSObjectProtocol] = []
 
@@ -130,11 +133,6 @@ final class CameraManager: NSObject, ObservableObject {
         currentDeviceID = device?.uniqueID
         sessionQueue.async {
             self.session.beginConfiguration()
-            if self.session.canSetSessionPreset(.hd1280x720) {
-                self.session.sessionPreset = .hd1280x720
-            } else {
-                self.session.sessionPreset = .high
-            }
             self.videoOutput.alwaysDiscardsLateVideoFrames = true
             self.videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
             self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
@@ -151,11 +149,34 @@ final class CameraManager: NSObject, ObservableObject {
         session.inputs.forEach { session.removeInput($0) }
         guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else { return }
         session.addInput(input)
+        useSmallFormat(device)
         // Keep analysed frames un-mirrored; mirroring is applied in the coordinate math.
         if let connection = videoOutput.connection(with: .video), connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = false
         }
+    }
+}
+
+// MARK: - Resolution
+
+extension CameraManager {
+    /// Body tracking needs ~720p at most; bigger frames (an iPhone defaults to 1080p+) only add lag.
+    /// Must run after the input is added, since supported presets depend on the camera.
+    fileprivate func useSmallFormat(_ device: AVCaptureDevice) {
+        if session.canSetSessionPreset(.hd1280x720) {
+            session.sessionPreset = .hd1280x720
+            return
+        }
+        func dims(_ f: AVCaptureDevice.Format) -> CMVideoDimensions { CMVideoFormatDescriptionGetDimensions(f.formatDescription) }
+        let candidates = device.formats.filter { f in
+            dims(f).width >= 640 && f.videoSupportedFrameRateRanges.contains { $0.maxFrameRate >= 30 }
+        }
+        // Closest to 1280 wide.
+        guard let best = candidates.min(by: { abs(Int(dims($0).width) - 1280) < abs(Int(dims($1).width) - 1280) }),
+              (try? device.lockForConfiguration()) != nil else { return }
+        device.activeFormat = best
+        device.unlockForConfiguration()
     }
 }
 
@@ -166,7 +187,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let size = CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer))
         let handler = VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .up)
+        let started = CACurrentMediaTime()
         try? handler.perform([poseRequest])
+        recordStats(trackingTime: CACurrentMediaTime() - started, size: size)
         let people = poseRequest.results ?? []
 
         let bodies = people.map(Self.body(from:))
@@ -184,6 +207,17 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             let count = people.count
             DispatchQueue.main.async { self.peopleCount = count }
         }
+    }
+
+    private func recordStats(trackingTime: Double, size: CGSize) {
+        statFrames += 1
+        statTrackingTime += trackingTime
+        let elapsed = CACurrentMediaTime() - statStart
+        guard elapsed >= 1 else { return }
+        let text = String(format: "%.0f×%.0f · %.0f fps · tracking %.0f ms",
+                          size.width, size.height, Double(statFrames) / elapsed, statTrackingTime / Double(statFrames) * 1000)
+        statFrames = 0; statTrackingTime = 0; statStart = CACurrentMediaTime()
+        DispatchQueue.main.async { self.stats = text }
     }
 
     private static func body(from observation: VNHumanBodyPoseObservation) -> Body {

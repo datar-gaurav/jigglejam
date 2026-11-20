@@ -87,7 +87,6 @@ final class BubbleScene: GameScene {
         m.fillColor = NSColor.white.withAlphaComponent(0.25)
         m.strokeColor = kind == .hand ? .white : .systemYellow
         m.lineWidth = 6
-        m.glowWidth = 6
         m.zPosition = 5
         m.isHidden = true
         return m
@@ -109,8 +108,8 @@ final class BubbleScene: GameScene {
                 m.isHidden = false
             } else {
                 // Smooth out jitter without feeling laggy.
-                m.position = CGPoint(x: m.position.x + (target.x - m.position.x) * 0.55,
-                                     y: m.position.y + (target.y - m.position.y) * 0.55)
+                m.position = CGPoint(x: m.position.x + (target.x - m.position.x) * 0.8,
+                                     y: m.position.y + (target.y - m.position.y) * 0.8)
             }
         }
         for i in pose.poppers.count..<max(markers.count, pose.poppers.count) {
