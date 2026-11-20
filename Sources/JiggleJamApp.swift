@@ -102,6 +102,11 @@ struct GameView: View {
             SpriteView(scene: scene, preferredFramesPerSecond: 60, options: [.allowsTransparency, .ignoresSiblingOrder],
                        debugOptions: showStats ? [.showsFPS, .showsNodeCount] : [])
                 .ignoresSafeArea()
+            if !showsCamera {
+                TrackingWindow(camera: camera, scene: scene)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(20)
+            }
             if showStats {
                 Text(camera.stats)
                     .font(.system(size: 14, weight: .semibold, design: .monospaced))
@@ -236,5 +241,58 @@ struct MenuView: View {
         case 1: return "✅ I can see you!"
         default: return "✅ I can see \(camera.peopleCount) players!"
         }
+    }
+}
+
+// MARK: - Tracking window
+
+/// Small live camera view with what the trackers see drawn on top, for games that hide the camera.
+/// Big green dots: hands (hand tracker). Small yellow dots: wrists/elbows (body tracker).
+struct TrackingWindow: View {
+    let camera: CameraManager
+    let scene: GameScene
+
+    var body: some View {
+        ZStack {
+            CameraPreview(session: camera.session)
+            TimelineView(.animation) { _ in
+                Canvas { context, size in
+                    let frame = camera.latestFrame
+                    // Same aspect-fill mapping as the preview layer, with SwiftUI's top-left origin.
+                    let scale = max(size.width / frame.imageSize.width, size.height / frame.imageSize.height)
+                    let w = frame.imageSize.width * scale, h = frame.imageSize.height * scale
+                    func point(_ p: CGPoint) -> CGPoint {
+                        CGPoint(x: (size.width - w) / 2 + p.x * w, y: size.height - ((size.height - h) / 2 + p.y * h))
+                    }
+                    func dot(_ p: CGPoint, _ r: CGFloat, _ color: Color) {
+                        let c = point(p)
+                        context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(color))
+                    }
+
+                    for body in frame.bodies {
+                        for joint in [Joint.leftWrist, .rightWrist, .leftElbow, .rightElbow] {
+                            if let p = body[joint] { dot(p, 5, .yellow) }
+                        }
+                    }
+                    if frame.hands.count >= 2 {
+                        var line = Path()
+                        line.move(to: point(frame.hands[0]))
+                        line.addLine(to: point(frame.hands[1]))
+                        context.stroke(line, with: .color(.green), lineWidth: 4)
+                    }
+                    for hand in frame.hands { dot(hand, 10, .green) }
+
+                    let label = "✋ \(frame.hands.count)  🧍 \(frame.bodies.count)  \(scene.debugText)"
+                    context.draw(
+                        Text(label).font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundColor(.white),
+                        at: CGPoint(x: size.width / 2, y: size.height - 14)
+                    )
+                }
+            }
+        }
+        .frame(width: 400, height: 225)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.7), lineWidth: 2))
+        .shadow(radius: 8)
     }
 }

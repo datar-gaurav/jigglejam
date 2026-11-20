@@ -14,6 +14,7 @@ final class DrivingScene: GameScene {
 
     override var needsFullBody: Bool { false }    // only hands matter here
     override var wantsHandTracking: Bool { true }
+    override var debugText: String { String(format: "steer %+.2f", steer) }
 
     private final class RoadItem {
         enum Kind { case star, puddle, decoration }

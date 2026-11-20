@@ -18,6 +18,9 @@ class GameScene: SKScene {
     /// Games that steer with hands turn on the dedicated hand tracker.
     var wantsHandTracking: Bool { false }
 
+    /// Short live readout for the tracking window (e.g. the steering value).
+    var debugText: String { "" }
+
     var currentPose: PoseFrame { frameProvider?() ?? PoseFrame() }
 
     private var lastUpdate: TimeInterval = 0
