@@ -55,3 +55,17 @@ open JiggleJam.xcodeproj   # then ⌘R
 | `Sources/MotionDetectors.swift` | Shared `JumpDetector` and `WalkDetector` (tuning at top of each) |
 | `Sources/DanceMusic.swift` | Tiny synthesized chiptune band, so no audio files are needed |
 | `Sources/JiggleJamApp.swift` | App, parent menu, game screen |
+
+## Privacy
+
+Everything runs on the Mac. Camera frames are analysed in memory by Apple's Vision framework
+and are never recorded, saved or sent anywhere.
+
+## Contributing
+
+Ideas, new games and fixes are welcome — open an issue or a pull request. Games subclass
+`GameScene` and implement `tick(dt:pose:)`; see `BubbleScene.swift` for the simplest example.
+
+## License
+
+[MIT](LICENSE)
