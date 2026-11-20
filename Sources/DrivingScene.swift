@@ -35,7 +35,13 @@ final class DrivingScene: GameScene {
     }
 
     private var distance: CGFloat = 0
-    private var steer: CGFloat = 0
+    private var steer: CGFloat = 0          // smoothed, -1...1, what the car uses
+    private var steerTarget: CGFloat = 0    // filtered camera reading
+    private var lateralVelocity: CGFloat = 0
+    private var steerFilter = OneEuroFilter(minCutoff: 0.9, beta: 0.6)
+    private var lastFrameTimestamp: Double = 0
+    private var lastHandTrackerTime: TimeInterval = -10
+    private var lastReading: SteeringReading?
     private var carX: CGFloat = 0
     private var carSpeed: CGFloat = 0
     private var handsMissing: TimeInterval = 0
@@ -222,16 +228,31 @@ final class DrivingScene: GameScene {
         now += dt
         let dt = CGFloat(dt)
 
-        // Steering
-        let reading = plateSteering(pose)
-        showHands(reading)
-        if let reading {
+        // Steering: read the camera only on new frames, filter, then ease toward it every frame.
+        if pose.timestamp != lastFrameTimestamp {
+            let frameDT = lastFrameTimestamp > 0 ? max(pose.timestamp - lastFrameTimestamp, 1.0 / 120) : 1.0 / 30
+            lastFrameTimestamp = pose.timestamp
+            var reading = plateSteering(pose)
+            if reading?.fromHandTracker == true {
+                lastHandTrackerTime = now
+            } else if now - lastHandTrackerTime < 0.4 {
+                // The hand tracker just blinked: hold its last reading instead of jumping to body joints.
+                reading = lastReading
+            }
+            if let reading {
+                lastReading = reading
+                lastReadingTime = now
+                steerTarget = steerFilter.filter(reading.value, dt: frameDT)
+            }
+            showHands(reading)
+        }
+        if plateSteeringSeenRecently {
             handsMissing = 0
-            steer += (reading.value - steer) * 0.25
         } else {
             handsMissing += Double(dt)
-            steer *= 0.9
+            steerTarget *= 0.95
         }
+        steer += (steerTarget - steer) * (1 - exp(-dt / 0.06))
         hintLabel.alpha += ((handsMissing > 1 ? 1 : 0) - hintLabel.alpha) * 0.1
         wheel.zRotation = -steer * fullLockAngle
         wheel.alpha = handsMissing > 0.5 ? 0.4 : 1
@@ -245,10 +266,13 @@ final class DrivingScene: GameScene {
         carSpeed += (targetSpeed - carSpeed) * min(1, acceleration * dt * 3)
         distance += carSpeed * dt
 
-        carX = min(max(carX + steer * size.width * 0.5 * dt, size.width * 0.05), size.width * 0.95)
+        // Softer near the center for fine control, full turn at the ends; the car eases into turns.
+        let shaped = (steer < 0 ? -1 : 1) * pow(abs(steer), 1.4)
+        lateralVelocity += (shaped * size.width * 0.5 - lateralVelocity) * (1 - exp(-dt / 0.15))
+        carX = min(max(carX + lateralVelocity * dt, size.width * 0.05), size.width * 0.95)
         let bump: CGFloat = offRoad ? .random(in: -3...3) : 0
         car.position = CGPoint(x: carX + bump, y: carY + bump)
-        car.zRotation = -steer * 0.35
+        car.zRotation = -lateralVelocity / (size.width * 0.5) * 0.35
 
         if offRoadTime > 1.5, now - lastNudge > 6 {
             lastNudge = now
@@ -259,6 +283,9 @@ final class DrivingScene: GameScene {
         spawnItems()
         moveItems()
     }
+
+    private var plateSteeringSeenRecently: Bool { lastReadingTime > 0 && now - lastReadingTime < 0.4 }
+    private var lastReadingTime: TimeInterval = 0
 
     private struct SteeringReading {
         var value: CGFloat
@@ -443,5 +470,36 @@ final class DrivingScene: GameScene {
         sounds.append(sound)
         if sounds.count > 4 { sounds.removeFirst() }
         sound.play()
+    }
+}
+
+/// One Euro filter (Casiez et al. 2012): heavy smoothing when the input is steady,
+/// little lag when it changes fast. Ideal for jittery tracking that also needs to feel responsive.
+struct OneEuroFilter {
+    var minCutoff: CGFloat  // Hz; lower = smoother when holding still
+    var beta: CGFloat       // higher = less lag on fast moves
+    var derivativeCutoff: CGFloat = 1
+    private var x: CGFloat?
+    private var dx: CGFloat = 0
+
+    init(minCutoff: CGFloat, beta: CGFloat) {
+        self.minCutoff = minCutoff
+        self.beta = beta
+    }
+
+    private static func alpha(cutoff: CGFloat, dt: CGFloat) -> CGFloat {
+        let tau = 1 / (2 * .pi * cutoff)
+        return 1 / (1 + tau / dt)
+    }
+
+    mutating func filter(_ value: CGFloat, dt: Double) -> CGFloat {
+        let dt = CGFloat(dt)
+        guard let previous = x else { x = value; return value }
+        let rawDX = (value - previous) / dt
+        dx += (rawDX - dx) * Self.alpha(cutoff: derivativeCutoff, dt: dt)
+        let cutoff = minCutoff + beta * abs(dx)
+        let next = previous + (value - previous) * Self.alpha(cutoff: cutoff, dt: dt)
+        x = next
+        return next
     }
 }

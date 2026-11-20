@@ -251,8 +251,11 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 
     private static func handCenter(from observation: VNHumanHandPoseObservation) -> CGPoint? {
         guard let points = try? observation.recognizedPoints(.all) else { return nil }
-        let confident = points.values.filter { $0.confidence > 0.3 }
-        guard confident.count >= 5 else { return nil }
+        // The palm (wrist + knuckles) stays put while fingers flicker in and out of detection.
+        let palmJoints: [VNHumanHandPoseObservation.JointName] = [.wrist, .indexMCP, .middleMCP, .ringMCP, .littleMCP]
+        let palm = palmJoints.compactMap { points[$0] }.filter { $0.confidence > 0.3 }
+        let confident = palm.count >= 2 ? palm : points.values.filter { $0.confidence > 0.3 }
+        guard confident.count >= 2 else { return nil }
         let x = confident.reduce(0) { $0 + $1.location.x } / CGFloat(confident.count)
         let y = confident.reduce(0) { $0 + $1.location.y } / CGFloat(confident.count)
         return CGPoint(x: 1 - x, y: y)
