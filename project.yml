@@ -52,6 +52,7 @@ targets:
       - path: Sources/Platform/MotionDetectors.swift
       - path: Sources/Platform/Packs/GamePack.swift
       - path: Sources/Platform/Packs/ScriptHost.swift
+      - path: Sources/Platform/Packs/ScriptRunner.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jigglejam.tests

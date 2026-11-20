@@ -56,6 +56,39 @@ final class ScriptHost {
         fn.call(withArguments: arguments)
     }
 
+    /// One game frame: advances script time (used for animations) and calls `onTick(dt, input)`.
+    func tick(dt: Double, input: [String: Any]) {
+        guard !failed else { return }
+        context.objectForKeyedSubscript("__jjAdvance")?.call(withArguments: [dt])
+        call("onTick", [dt, input])
+    }
+
+    // MARK: - Time limit
+
+    /// Caps how long any single call into the script may run; past it, JavaScriptCore terminates
+    /// the script (an endless loop becomes an error instead of a frozen app). Returns false if this
+    /// macOS doesn't offer the capability, in which case `ScriptRunner`'s watchdog still keeps the
+    /// UI responsive.
+    @discardableResult
+    func setTimeLimit(_ seconds: Double) -> Bool {
+        guard let setLimit = Self.setExecutionTimeLimit else { return false }
+        setLimit(JSContextGetGroup(context.jsGlobalContextRef), seconds, { _, _ in true }, nil)
+        return true
+    }
+
+    static var canLimitTime: Bool { setExecutionTimeLimit != nil }
+
+    private typealias ShouldTerminate = @convention(c) (JSContextRef?, UnsafeMutableRawPointer?) -> Bool
+    private typealias SetLimit = @convention(c) (JSContextGroupRef?, Double, ShouldTerminate?, UnsafeMutableRawPointer?) -> Void
+
+    /// `JSContextGroupSetExecutionTimeLimit` is in JavaScriptCore but not in its public headers,
+    /// so it's looked up at runtime and used only if present.
+    private static let setExecutionTimeLimit: SetLimit? = {
+        guard let handle = dlopen("/System/Library/Frameworks/JavaScriptCore.framework/JavaScriptCore", RTLD_NOW),
+              let symbol = dlsym(handle, "JSContextGroupSetExecutionTimeLimit") else { return nil }
+        return unsafeBitCast(symbol, to: SetLimit.self)
+    }()
+
     /// Evaluates an expression and returns it (for tests and debugging).
     func evaluate(_ expression: String) -> JSValue? {
         context.evaluateScript(expression)
@@ -104,19 +137,44 @@ final class ScriptHost {
       const N = __native;
       delete globalThis.__native;
 
+      let now = 0; // seconds of game time, advanced by the host every frame
+      globalThis.__jjAdvance = (dt) => { now += dt; };
+
       class Sprite {
         constructor(kind, props) {
           this._p = Object.assign({ x: 0, y: 0, size: 60, rotation: 0, alpha: 1, visible: true, scale: 1 }, props || {});
           this.kind = kind;
           this.removed = false;
+          this._anim = null; // { fromX, fromY, start, seconds } while moveTo is running
           this.id = N.create(kind, this._p);
         }
         _set(key, value) {
           this._p[key] = value;
           if (!this.removed) { const change = {}; change[key] = value; N.update(this.id, change); }
         }
-        get x() { return this._p.x; }               set x(v) { this._set("x", v); }
-        get y() { return this._p.y; }               set y(v) { this._set("y", v); }
+        /// Where the sprite is right now: mid-animation this follows the renderer's linear move,
+        /// so hit tests match what's on screen rather than the destination.
+        _pos() {
+          const a = this._anim;
+          if (!a) return { x: this._p.x, y: this._p.y };
+          const t = a.seconds <= 0 ? 1 : Math.min((now - a.start) / a.seconds, 1);
+          if (t >= 1) { this._anim = null; return { x: this._p.x, y: this._p.y }; }
+          return { x: a.fromX + (this._p.x - a.fromX) * t, y: a.fromY + (this._p.y - a.fromY) * t };
+        }
+        /// Setting x or y mid-animation stops the animation where the sprite currently is.
+        _setPosition(key, value) {
+          if (this._anim) {
+            const p = this._pos();
+            this._anim = null;
+            this._p.x = p.x; this._p.y = p.y;
+            this._p[key] = value;
+            if (!this.removed) N.update(this.id, { x: this._p.x, y: this._p.y });
+          } else {
+            this._set(key, value);
+          }
+        }
+        get x() { return this._pos().x; }           set x(v) { this._setPosition("x", v); }
+        get y() { return this._pos().y; }           set y(v) { this._setPosition("y", v); }
         get size() { return this._p.size; }         set size(v) { this._set("size", v); }
         get rotation() { return this._p.rotation; } set rotation(v) { this._set("rotation", v); }
         get alpha() { return this._p.alpha; }       set alpha(v) { this._set("alpha", v); }
@@ -126,15 +184,19 @@ final class ScriptHost {
         get color() { return this._p.color; }       set color(v) { this._set("color", v); }
         get z() { return this._p.z; }               set z(v) { this._set("z", v); }
         moveTo(x, y, seconds) {
+          const s = seconds === undefined ? 0.3 : Math.max(seconds, 0);
+          const p = this._pos();
+          this._anim = { fromX: p.x, fromY: p.y, start: now, seconds: s };
           this._p.x = x; this._p.y = y;
-          if (!this.removed) N.effect(this.id, "moveTo", { x: x, y: y, seconds: seconds === undefined ? 0.3 : seconds });
+          if (!this.removed) N.effect(this.id, "moveTo", { x: x, y: y, seconds: s });
           return this;
         }
         pulse() { if (!this.removed) N.effect(this.id, "pulse", {}); return this; }
         burst() { if (!this.removed) N.effect(this.id, "burst", {}); return this; }
         /// True if a point (e.g. a hand) is within this sprite's radius plus `reach`.
         touches(point, reach) {
-          return Math.hypot(point.x - this._p.x, point.y - this._p.y) < this._p.size * this._p.scale / 2 + (reach || 0);
+          const p = this._pos();
+          return Math.hypot(point.x - p.x, point.y - p.y) < this._p.size * this._p.scale / 2 + (reach || 0);
         }
         remove() { if (!this.removed) { this.removed = true; N.remove(this.id); } }
       }

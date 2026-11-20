@@ -1,4 +1,5 @@
 import Foundation
+import JavaScriptCore
 
 /// `manifest.json` at the root of a game pack. See docs/GAME_PACKS.md.
 struct GameManifest: Codable, Equatable {
@@ -38,6 +39,8 @@ enum GamePackError: LocalizedError, Equatable {
     case tooLarge
     case archiveFailed(String)
     case builtInCannotBeExported
+    case scriptError(String)
+    case tooManyFiles
 
     var errorDescription: String? {
         switch self {
@@ -50,6 +53,8 @@ enum GamePackError: LocalizedError, Equatable {
         case .tooLarge: return "That game is too big (the limit is 50 MB)."
         case .archiveFailed(let why): return "The game file couldn't be unpacked or packed: \(why)"
         case .builtInCannotBeExported: return "Built-in games are part of the app and can't be exported."
+        case .scriptError(let why): return "The game's code has a mistake, so it wasn't added: \(why)"
+        case .tooManyFiles: return "That game has too many files (the limit is \(GamePack.maxFiles))."
         }
     }
 }
@@ -59,6 +64,7 @@ struct GamePack: Equatable {
     static let currentFormat = 1
     static let fileExtension = "jigglegame"
     static let maxBytes = 50 * 1024 * 1024
+    static let maxFiles = 2_000
     /// Setup checks a manifest may ask for (matches `SetupRequirement` in the app).
     static let knownSetupChecks: Set<String> = ["seen", "hands", "feet", "knees", "wholeBody", "bothHands", "wheelLevel"]
 
@@ -104,6 +110,28 @@ struct GamePack: Equatable {
         return url.path.hasPrefix(root + "/") ? url : nil
     }
 
+    /// Parses the main script without running it. Returns an error message, or nil if it's valid.
+    func scriptSyntaxError() -> String? {
+        guard let source = try? String(contentsOf: mainScriptURL, encoding: .utf8) else {
+            return "\(manifest.main) isn't readable UTF-8 text"
+        }
+        return Self.syntaxError(in: source, name: manifest.main)
+    }
+
+    static func syntaxError(in source: String, name: String) -> String? {
+        let context = JSGlobalContextCreate(nil)
+        defer { JSGlobalContextRelease(context) }
+        let script = JSStringCreateWithCFString(source as CFString)
+        let url = JSStringCreateWithCFString(name as CFString)
+        defer { JSStringRelease(script); JSStringRelease(url) }
+        var exception: JSValueRef?
+        guard !JSCheckScriptSyntax(context, script, url, 1, &exception) else { return nil }
+        guard let exception, let jsContext = JSContext(jsGlobalContextRef: context),
+              let value = JSValue(jsValueRef: exception, in: jsContext) else { return "syntax error" }
+        let line = value.objectForKeyedSubscript("line")?.toInt32() ?? 0
+        return "line \(line): \(value.toString() ?? "syntax error")"
+    }
+
     private static func size(of directory: URL) -> Int {
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]
         guard let items = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys) else { return 0 }
@@ -118,8 +146,60 @@ struct GamePack: Equatable {
 
 /// `.jigglegame` files are zip archives of a pack folder's contents.
 enum GamePackArchive {
-    static func unpack(_ archive: URL, into directory: URL) throws {
-        try run(["-x", "-k", archive.path, directory.path])
+    /// Extracts with hard limits: the archive's declared contents are checked first, and the
+    /// extraction is stopped as soon as the real extracted size or file count goes over.
+    /// `checkDeclaredSize: false` skips the up-front check (tests use it to exercise the monitor,
+    /// which is what protects against archives that lie about their size).
+    static func unpack(_ archive: URL, into directory: URL,
+                       maxBytes: Int = GamePack.maxBytes, maxFiles: Int = GamePack.maxFiles,
+                       checkDeclaredSize: Bool = true) throws {
+        let archiveSize = (try? archive.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard archiveSize <= maxBytes else { throw GamePackError.tooLarge }
+        if checkDeclaredSize, let declared = declaredContents(of: archive) {
+            guard declared.files <= maxFiles else { throw GamePackError.tooManyFiles }
+            guard declared.bytes <= maxBytes else { throw GamePackError.tooLarge }
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-x", "-k", archive.path, directory.path]
+        let errors = Pipe()
+        process.standardError = errors
+        do { try process.run() } catch { throw GamePackError.archiveFailed(error.localizedDescription) }
+
+        var exceeded: GamePackError?
+        while process.isRunning {
+            Thread.sleep(forTimeInterval: 0.05)
+            let usage = DirectoryUsage.measure(directory)
+            if usage.bytes > maxBytes { exceeded = .tooLarge } else if usage.files > maxFiles { exceeded = .tooManyFiles }
+            if exceeded != nil { process.terminate(); break }
+        }
+        process.waitUntilExit()
+        if let exceeded { throw exceeded }
+        let usage = DirectoryUsage.measure(directory)
+        if usage.bytes > maxBytes { throw GamePackError.tooLarge }
+        if usage.files > maxFiles { throw GamePackError.tooManyFiles }
+        guard process.terminationStatus == 0 else {
+            let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw GamePackError.archiveFailed(message.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    /// File count and total uncompressed size the zip says it contains (from `zipinfo -t`).
+    static func declaredContents(of archive: URL) -> (files: Int, bytes: Int)? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zipinfo")
+        process.arguments = ["-t", archive.path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return nil }
+        process.waitUntilExit()
+        let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        // e.g. "2 files, 2262 bytes uncompressed, 1240 bytes compressed:  45.2%"
+        let numbers = text.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        guard text.contains("uncompressed"), numbers.count >= 2 else { return nil }
+        return (numbers[0], numbers[1])
     }
 
     static func pack(_ directory: URL, to archive: URL) throws {
@@ -142,12 +222,31 @@ enum GamePackArchive {
     }
 }
 
+/// Bytes and file count of a folder tree (symlinks are counted, not followed).
+enum DirectoryUsage {
+    static func measure(_ directory: URL) -> (bytes: Int, files: Int) {
+        let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]
+        guard let items = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys) else { return (0, 0) }
+        var bytes = 0, files = 0
+        for case let url as URL in items {
+            files += 1
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            if values?.isRegularFile == true { bytes += values?.fileSize ?? 0 }
+        }
+        return (bytes, files)
+    }
+}
+
 /// Installed packs live unpacked in one folder per game id.
 final class GamePackStore {
     let root: URL
+    let maxBytes: Int
+    let maxFiles: Int
 
-    init(root: URL = GamePackStore.defaultRoot) {
+    init(root: URL = GamePackStore.defaultRoot, maxBytes: Int = GamePack.maxBytes, maxFiles: Int = GamePack.maxFiles) {
         self.root = root
+        self.maxBytes = maxBytes
+        self.maxFiles = maxFiles
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
@@ -158,15 +257,20 @@ final class GamePackStore {
 
     /// All valid installed packs, sorted by title. Broken folders are skipped.
     func installed() -> [GamePack] {
-        let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil,
+                                                                    options: .skipsHiddenFiles)) ?? []
         return folders.compactMap { try? GamePack.load(from: $0) }
             .sorted { $0.manifest.title.localizedCaseInsensitiveCompare($1.manifest.title) == .orderedAscending }
     }
 
-    /// Installs a `.jigglegame` file (or an unpacked pack folder). A pack with the same id is replaced.
+    /// Installs a `.jigglegame` file (or an unpacked pack folder). A pack with the same id is
+    /// replaced, but only once the new one is fully unpacked and validated (manifest, paths,
+    /// limits and script syntax); the swap is atomic, so a failed update keeps the old version.
+    /// Slow for big packs: call off the main thread.
     @discardableResult
     func install(from source: URL) throws -> GamePack {
-        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("jigglejam-import-\(UUID().uuidString)")
+        // Stage inside the library folder (hidden) so the final swap is a same-volume rename.
+        let staging = root.appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: staging) }
 
@@ -174,10 +278,14 @@ final class GamePackStore {
         FileManager.default.fileExists(atPath: source.path, isDirectory: &isDirectory)
         let unpacked = staging.appendingPathComponent("pack")
         if isDirectory.boolValue {
+            // Measure before copying anything.
+            let usage = DirectoryUsage.measure(source)
+            guard usage.bytes <= maxBytes else { throw GamePackError.tooLarge }
+            guard usage.files <= maxFiles else { throw GamePackError.tooManyFiles }
             try FileManager.default.copyItem(at: source, to: unpacked)
         } else {
             try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
-            try GamePackArchive.unpack(source, into: unpacked)
+            try GamePackArchive.unpack(source, into: unpacked, maxBytes: maxBytes, maxFiles: maxFiles)
         }
 
         // Accept the manifest at the top level, or inside a single top-level folder.
@@ -188,12 +296,14 @@ final class GamePackStore {
             if entries.count == 1 { packRoot = entries[0] }
         }
         let validated = try GamePack.load(from: packRoot)
+        if let error = validated.scriptSyntaxError() { throw GamePackError.scriptError(error) }
 
         let destination = root.appendingPathComponent(validated.manifest.id, isDirectory: true)
         if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: packRoot)
+        } else {
+            try FileManager.default.moveItem(at: packRoot, to: destination)
         }
-        try FileManager.default.moveItem(at: packRoot, to: destination)
         return try GamePack.load(from: destination)
     }
 

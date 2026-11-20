@@ -22,7 +22,7 @@ MyGame/
 ```
 
 A `.jigglegame` file is a zip of the folder's contents (or of the folder itself). Packs are
-limited to 50 MB, and files are only ever read from inside the pack.
+limited to 50 MB and 2,000 files, and files are only ever read from inside the pack.
 
 ## manifest.json
 
@@ -125,7 +125,7 @@ Set properties and the screen updates: `x`, `y`, `size`, `rotation` (degrees), `
 `scale`, `visible`, `text`, `color`, `z` (stacking order).
 
 ```js
-sprite.moveTo(x, y, seconds)   // smooth move
+sprite.moveTo(x, y, seconds)   // smooth, linear move; x, y and touches() follow it as it goes
 sprite.pulse()                 // quick grow-and-shrink
 sprite.burst()                 // splash of dots (great right before remove())
 sprite.touches(point, reach)   // is a hand/foot within the sprite (+ reach)?
@@ -154,13 +154,20 @@ function onTick(dt, input) {
 }
 ```
 
-## Safety
+## Safety and limits
 
-Pack code runs in its own JavaScript sandbox. It can't read or write files, use the
-network or run timers — it can only use the `game` API above. If a script throws an error,
-the game shows "This game hit a problem" with the message instead of crashing the app.
-Still, only import games from people you trust: a script with an endless loop can freeze
-the app until it's quit.
+- **Sandboxed code.** Pack code runs in its own JavaScript sandbox on its own thread. It can't
+  read or write files, use the network or run timers; it can only use the `game` API above, and
+  it only ever sees tracking results (joint positions), never camera images.
+- **Time budget.** `onStart` (with loading) gets 2 seconds and every other callback 0.25 seconds.
+  A script that runs longer — say, an endless loop — is stopped, and the game shows "This game
+  took too long and was stopped" while the app stays responsive (Esc still works). If a frame's
+  callback is merely slow, that frame is skipped and its time carries over to the next one.
+- **Errors.** If a script throws, the game shows "This game hit a problem" with the message.
+- **Import checks.** Before anything is installed, a pack is unpacked with limits enforced as it
+  extracts (50 MB, 2,000 files), its manifest and file paths are validated, and its script is
+  syntax-checked without running it. Updating a game (same `id`) only replaces the installed
+  copy once the new one passes every check, so a broken update keeps the old version.
 
 ## Tips for little players
 

@@ -245,3 +245,154 @@ extension GamePackTests {
         XCTAssertFalse(host.failed, host.lastError ?? "")
     }
 }
+
+// MARK: - Review fixes: safe updates, limits, runaway scripts, animated hit tests
+
+extension GamePackTests {
+    /// Review finding: importing a broken update replaced the working game.
+    func testBrokenUpdateKeepsTheWorkingVersion() throws {
+        let store = GamePackStore(root: temp.appendingPathComponent("library"))
+        try store.install(from: makePack("good", files: ["game.js": "// version 1\nfunction onTick() {}"]))
+        XCTAssertThrowsError(try store.install(from: makePack("bad", manifest: ["version": "2"],
+                                                              files: ["game.js": "function onTick( {"]))) { error in
+            guard case .scriptError? = error as? GamePackError else { return XCTFail("\(error)") }
+        }
+        let installed = try XCTUnwrap(store.installed().first)
+        XCTAssertEqual(try String(contentsOf: installed.mainScriptURL, encoding: .utf8), "// version 1\nfunction onTick() {}")
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: store.root.path)
+        XCTAssertEqual(leftovers, ["com.test.game"], "no staging folders left behind")
+    }
+
+    func testSyntaxCheckDoesNotRunTheScript() {
+        XCTAssertNil(GamePack.syntaxError(in: "while (true) {}", name: "loop.js"), "valid, and checking it must not hang")
+        XCTAssertNotNil(GamePack.syntaxError(in: "let = ;", name: "bad.js"))
+    }
+
+    /// Review finding: the size limit was only checked after everything was extracted.
+    func testOversizedArchiveIsRejectedBeforeInstalling() throws {
+        let big = String(repeating: "jiggle ", count: 20_000) // ~140 KB, compresses well
+        let folder = try makePack("big", files: ["game.js": "function onTick() {}", "data.txt": big])
+        let archive = temp.appendingPathComponent("big.jigglegame")
+        try GamePackArchive.pack(folder, to: archive)
+
+        let store = GamePackStore(root: temp.appendingPathComponent("library"), maxBytes: 50_000)
+        XCTAssertThrowsError(try store.install(from: archive)) { XCTAssertEqual($0 as? GamePackError, .tooLarge) }
+        XCTAssertThrowsError(try store.install(from: folder)) { XCTAssertEqual($0 as? GamePackError, .tooLarge) }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.root.path), [])
+    }
+
+    func testTooManyFilesIsRejected() throws {
+        var files = ["game.js": "function onTick() {}"]
+        for i in 0..<30 { files["art/\(i).txt"] = "x" }
+        let folder = try makePack("many", files: files)
+        let archive = temp.appendingPathComponent("many.jigglegame")
+        try GamePackArchive.pack(folder, to: archive)
+
+        let store = GamePackStore(root: temp.appendingPathComponent("library"), maxFiles: 10)
+        XCTAssertThrowsError(try store.install(from: archive)) { XCTAssertEqual($0 as? GamePackError, .tooManyFiles) }
+        XCTAssertThrowsError(try store.install(from: folder)) { XCTAssertEqual($0 as? GamePackError, .tooManyFiles) }
+    }
+
+    func testExtractionIsStoppedWhenTheRealSizeGoesOverTheLimit() throws {
+        // Bypass the declared-size pre-check to exercise the in-flight monitor directly.
+        let big = String(repeating: "x", count: 2_000_000)
+        let folder = try makePack("huge", files: ["game.js": "", "a.txt": big, "b.txt": big, "c.txt": big])
+        let archive = temp.appendingPathComponent("huge.zip")
+        try GamePackArchive.pack(folder, to: archive)
+        let out = temp.appendingPathComponent("out")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        XCTAssertGreaterThan(GamePackArchive.declaredContents(of: archive)?.bytes ?? 0, 5_000_000, "really over the limit")
+        XCTAssertThrowsError(try GamePackArchive.unpack(archive, into: out, maxBytes: 5_000_000, maxFiles: 100,
+                                                        checkDeclaredSize: false)) {
+            XCTAssertEqual($0 as? GamePackError, .tooLarge)
+        }
+        XCTAssertLessThan(DirectoryUsage.measure(out).bytes, 7_000_000)
+    }
+
+    /// Review finding: a pack callback that never returns froze the whole app.
+    func testRunawayScriptCannotFreezeTheApp() {
+        let runner = ScriptRunner(screenSize: CGSize(width: 1280, height: 720))
+        runner.callBudget = 0.2
+        runner.hangGrace = 0.3
+        runner.start(script: "function onTick() { while (true) {} }", name: "loop.js")
+        XCTAssertTrue(runner.waitUntilIdle(timeout: 2))
+
+        let before = Date()
+        XCTAssertTrue(runner.tick(dt: 1.0 / 60, input: [:]))
+        XCTAssertLessThan(Date().timeIntervalSince(before), 0.05, "sending a frame never blocks")
+        XCTAssertFalse(runner.tick(dt: 1.0 / 60, input: [:]), "busy: the next frame is skipped, not queued")
+
+        let deadline = Date().addingTimeInterval(3)
+        while runner.failure == nil, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        XCTAssertNotNil(runner.failure, "reported as stopped / not responding")
+        if ScriptHost.canLimitTime {
+            XCTAssertTrue(runner.waitUntilIdle(timeout: 1), "the endless loop was actually terminated")
+            XCTAssertTrue(runner.failure?.contains("took too long") == true, runner.failure ?? "")
+        }
+    }
+
+    func testRunawayStartIsStoppedToo() {
+        let runner = ScriptRunner(screenSize: CGSize(width: 1280, height: 720))
+        runner.startBudget = 0.3
+        runner.hangGrace = 0.3
+        runner.start(script: "function onStart() { for (;;) {} }", name: "loop.js")
+        let deadline = Date().addingTimeInterval(3)
+        while runner.failure == nil, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        XCTAssertNotNil(runner.failure)
+    }
+
+    func testRunnerRecordsDrawingForTheMainThread() {
+        let runner = ScriptRunner(screenSize: CGSize(width: 1000, height: 500))
+        runner.start(script: """
+            let s;
+            function onStart() { s = game.emoji("⭐️", { x: game.width / 2, y: 10 }); }
+            function onTick(dt) { s.y += 100 * dt; }
+            """, name: "t.js")
+        runner.waitUntilIdle(timeout: 1)
+        runner.tick(dt: 0.5, input: [:])
+        runner.waitUntilIdle(timeout: 1)
+        let commands = runner.recorder.drain()
+        guard case let .create(id, kind, props)? = commands.first else { return XCTFail("\(commands)") }
+        XCTAssertEqual(kind, "emoji")
+        XCTAssertEqual((props["x"] as? NSNumber)?.doubleValue, 500)
+        guard case let .update(uid, change)? = commands.last else { return XCTFail("\(commands)") }
+        XCTAssertEqual(uid, id)
+        XCTAssertEqual((change["y"] as? NSNumber)?.doubleValue, 60)
+        XCTAssertNil(runner.failure)
+    }
+
+    /// Review finding: right after starting a 2 s moveTo, touches() hit at the destination.
+    func testHitTestsFollowAnimatedSprites() {
+        let renderer = FakeRenderer()
+        let host = ScriptHost(renderer: renderer)
+        host.load(script: """
+            var s, results = [];
+            function onStart() { s = game.circle({ x: 0, y: 0, size: 20 }); s.moveTo(1000, 0, 2); }
+            function onTick() { results.push([s.x, s.touches({ x: 0, y: 0 }), s.touches({ x: 1000, y: 0 })]); }
+            """, name: "anim.js")
+        host.call("onStart")
+        host.tick(dt: 0, input: [:])     // just started
+        host.tick(dt: 1, input: [:])     // halfway
+        host.tick(dt: 1, input: [:])     // arrived
+        let results = host.evaluate("JSON.stringify(results)")?.toString()
+        XCTAssertEqual(results, "[[0,true,false],[500,false,false],[1000,false,true]]")
+        XCTAssertFalse(host.failed, host.lastError ?? "")
+    }
+
+    func testSettingPositionMidAnimationStopsItWhereItIs() {
+        let renderer = FakeRenderer()
+        let host = ScriptHost(renderer: renderer)
+        host.load(script: """
+            var s;
+            function onStart() { s = game.circle({ x: 0, y: 0 }); s.moveTo(1000, 0, 2); }
+            function onTick() { s.y = 50; }
+            """, name: "anim.js")
+        host.call("onStart")
+        host.tick(dt: 1, input: [:])
+        XCTAssertEqual(host.evaluate("s.x")?.toDouble(), 500)
+        XCTAssertEqual(renderer.number(1, "x"), 500, "renderer is told where the sprite stopped")
+        XCTAssertEqual(renderer.number(1, "y"), 50)
+        host.tick(dt: 5, input: [:])
+        XCTAssertEqual(host.evaluate("s.x")?.toDouble(), 500, "animation stays cancelled")
+    }
+}

@@ -3,16 +3,19 @@ import AppKit
 import Vision
 
 /// Runs an imported game pack: the platform supplies tracking, setup, pausing and effects, and
-/// the pack's JavaScript supplies the game. Coordinates given to scripts are scene points with
-/// the origin at the bottom-left, the same space sprites are placed in.
-final class ScriptedGameScene: GameScene, ScriptRenderer {
+/// the pack's JavaScript supplies the game. The script runs on its own thread (`ScriptRunner`);
+/// each frame the scene sends input, waits a few milliseconds at most, and applies whatever the
+/// script drew. Coordinates given to scripts are scene points with the origin at the bottom-left.
+final class ScriptedGameScene: GameScene {
     let pack: GamePack
-    private var host: ScriptHost?
+    private var runner: ScriptRunner?
+    private var pendingDT: Double = 0
+    /// How long a frame waits for the script before drawing anyway (it catches up next frame).
+    private let frameWait: Double = 0.006
     private let moves = Locomotion()
     private var nodes: [Int: SKNode] = [:]
     private var nodeProps: [Int: [String: Any]] = [:]
     private var nodeKinds: [Int: String] = [:]
-    private var nextID = 1
     private var textures: [String: SKTexture] = [:]
     private var sounds: [NSSound] = []
     private var lastLog = ""
@@ -28,7 +31,7 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
     override var needsFullBody: Bool { pack.manifest.needsFullBody ?? false }
     override var wantsHandTracking: Bool { pack.manifest.handTracking ?? false }
     override func hasPlayer(_ pose: PoseFrame) -> Bool { !pose.bodies.isEmpty || !pose.hands.isEmpty }
-    override var debugText: String { host?.lastError.map { "⚠️ \($0)" } ?? lastLog }
+    override var debugText: String { runner?.failure.map { "⚠️ \($0)" } ?? lastLog }
 
     // MARK: - Lifecycle
 
@@ -36,34 +39,64 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
         backgroundColor = (pack.manifest.showsCamera ?? true)
             ? .clear
             : (NSColor(hexString: pack.manifest.background) ?? NSColor(calibratedRed: 0.1, green: 0.12, blue: 0.3, alpha: 1))
-        guard host == nil else { return }
-        let host = ScriptHost(renderer: self)
-        self.host = host
+        guard runner == nil else { return }
         guard let source = try? String(contentsOf: pack.mainScriptURL, encoding: .utf8) else {
             showError("Couldn't read \(pack.manifest.main).")
             return
         }
-        host.load(script: source, name: pack.manifest.main)
-        host.call("onStart")
-        if let error = host.lastError { showError(error) }
+        let runner = ScriptRunner(screenSize: size)
+        self.runner = runner
+        runner.start(script: source, name: pack.manifest.main)
+        runner.waitUntilIdle(timeout: frameWait)
+        applyScriptOutput()
+    }
+
+    override func didChangeSize(_ oldSize: CGSize) {
+        runner?.recorder.setScreenSize(size)
     }
 
     override func tick(dt: TimeInterval, pose: PoseFrame) {
-        guard let host, !host.failed else { return }
+        guard let runner, !showingError else { return }
         let jumped = moves.update(pose, now: CACurrentMediaTime())
-        host.call("onTick", [dt, input(from: pose, jumped: jumped)])
-        if let error = host.lastError { showError(error) }
+        pendingDT += dt
+        if runner.tick(dt: pendingDT, input: input(from: pose, jumped: jumped)) {
+            pendingDT = 0
+        }
+        runner.waitUntilIdle(timeout: frameWait)
+        applyScriptOutput()
     }
 
     override func trackingDidResume() { moves.reset() }
 
     override func pauseChanged(paused: Bool) {
-        host?.call(paused ? "onPause" : "onResume")
+        runner?.call(paused ? "onPause" : "onResume")
     }
 
     override func tearDown() {
-        host = nil
+        runner?.stop()
+        runner = nil
         super.tearDown()
+    }
+
+    /// Applies what the script drew since last frame, and shows its error if it failed or hung.
+    private func applyScriptOutput() {
+        guard let runner else { return }
+        for command in runner.recorder.drain() {
+            switch command {
+            case let .create(id, kind, props): createNode(id: id, kind: kind, props: props)
+            case let .update(id, props): updateNode(id, props: props)
+            case let .effect(id, name, props): nodeEffect(id, effect: name, props: props)
+            case let .remove(id): removeNode(id)
+            case let .say(text): say(text)
+            case let .sound(name): playSound(name)
+            case .confetti: confetti(count: 50)
+            case let .log(message): log(message)
+            }
+        }
+        if let failure = runner.failure {
+            runner.stop()
+            showError(failure)
+        }
     }
 
     // MARK: - Input for scripts
@@ -112,11 +145,9 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
         return result
     }
 
-    // MARK: - ScriptRenderer
+    // MARK: - Drawing what the script asked for
 
-    var screenSize: CGSize { size }
-
-    func createNode(kind: String, props: [String: Any]) -> Int {
+    private func createNode(id: Int, kind: String, props: [String: Any]) {
         let node: SKNode
         switch kind {
         case "emoji", "text":
@@ -130,20 +161,17 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
             node = SKSpriteNode()
         default:
             log("Unknown sprite kind \"\(kind)\"")
-            return -1
+            return
         }
-        let id = nextID
-        nextID += 1
         nodes[id] = node
         nodeKinds[id] = kind
         nodeProps[id] = [:]
         node.zPosition = 5
         addChild(node)
         updateNode(id, props: props)
-        return id
     }
 
-    func updateNode(_ id: Int, props: [String: Any]) {
+    private func updateNode(_ id: Int, props: [String: Any]) {
         guard let node = nodes[id], let kind = nodeKinds[id] else { return }
         var all = nodeProps[id] ?? [:]
         all.merge(props) { _, new in new }
@@ -153,6 +181,7 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
         let changed = Set(props.keys)
 
         if changed.contains("x") || changed.contains("y") {
+            node.removeAction(forKey: "moveTo") // setting a position ends any running moveTo
             node.position = CGPoint(x: num("x") ?? 0, y: num("y") ?? 0)
         }
         if changed.contains("rotation") { node.zRotation = (num("rotation") ?? 0) * .pi / 180 }
@@ -192,7 +221,7 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
         }
     }
 
-    func nodeEffect(_ id: Int, effect: String, props: [String: Any]) {
+    private func nodeEffect(_ id: Int, effect: String, props: [String: Any]) {
         guard let node = nodes[id] else { return }
         switch effect {
         case "moveTo":
@@ -200,7 +229,9 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
             let y = (props["y"] as? NSNumber).map { CGFloat(truncating: $0) } ?? node.position.y
             let seconds = (props["seconds"] as? NSNumber)?.doubleValue ?? 0.3
             node.removeAction(forKey: "moveTo")
-            node.run(.move(to: CGPoint(x: x, y: y), duration: max(seconds, 0)), withKey: "moveTo")
+            let move = SKAction.move(to: CGPoint(x: x, y: y), duration: max(seconds, 0))
+            move.timingMode = .linear // must match the script's interpolation in Sprite._pos()
+            node.run(move, withKey: "moveTo")
         case "pulse":
             let base = node.xScale
             node.run(.sequence([.scale(to: base * 1.25, duration: 0.08), .scale(to: base, duration: 0.15)]))
@@ -211,13 +242,13 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
         }
     }
 
-    func removeNode(_ id: Int) {
+    private func removeNode(_ id: Int) {
         nodes.removeValue(forKey: id)?.removeFromParent()
         nodeProps.removeValue(forKey: id)
         nodeKinds.removeValue(forKey: id)
     }
 
-    func playSound(_ name: String) {
+    private func playSound(_ name: String) {
         let sound: NSSound?
         if let url = pack.resource(name), FileManager.default.fileExists(atPath: url.path) {
             sound = NSSound(contentsOf: url, byReference: false)
@@ -230,9 +261,7 @@ final class ScriptedGameScene: GameScene, ScriptRenderer {
         sound.play()
     }
 
-    func confetti() { confetti(count: 50) }
-
-    func log(_ message: String) {
+    private func log(_ message: String) {
         lastLog = message
         print("[\(pack.manifest.id)] \(message)")
     }

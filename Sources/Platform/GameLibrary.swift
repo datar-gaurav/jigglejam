@@ -53,6 +53,8 @@ extension GameEntry {
 /// Built-in games plus installed packs, with import / export / remove.
 final class GameLibrary: ObservableObject {
     @Published private(set) var games: [GameEntry] = []
+    /// True while a game is being unpacked and checked (done off the main thread).
+    @Published private(set) var isBusy = false
 
     private let store: GamePackStore
     private let builtIns: [GameEntry]
@@ -70,17 +72,25 @@ final class GameLibrary: ObservableObject {
         games = builtIns + store.installed().map(GameEntry.init(pack:))
     }
 
-    /// Installs a `.jigglegame` file and returns its entry.
-    @discardableResult
-    func importGame(from url: URL) throws -> GameEntry {
-        let pack = try store.install(from: url)
+    /// Installs a `.jigglegame` file and returns its entry. Unpacking and checking run in the
+    /// background so a big or slow file never freezes the menu.
+    @MainActor @discardableResult
+    func importGame(from url: URL) async throws -> GameEntry {
+        isBusy = true
+        defer { isBusy = false }
+        let store = self.store
+        let pack = try await Task.detached(priority: .userInitiated) { try store.install(from: url) }.value
         reload()
         return GameEntry(pack: pack)
     }
 
-    func export(_ entry: GameEntry, to url: URL) throws {
+    @MainActor
+    func export(_ entry: GameEntry, to url: URL) async throws {
         guard let pack = entry.pack else { throw GamePackError.builtInCannotBeExported }
-        try store.export(pack, to: url)
+        isBusy = true
+        defer { isBusy = false }
+        let store = self.store
+        try await Task.detached(priority: .userInitiated) { try store.export(pack, to: url) }.value
     }
 
     func remove(_ entry: GameEntry) throws {

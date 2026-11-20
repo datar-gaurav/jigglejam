@@ -40,11 +40,13 @@ struct ContentView: View {
             // Double-clicking a .jigglegame file in Finder.
             guard url.isFileURL else { return }
             game = nil
-            do {
-                let entry = try library.importGame(from: url)
-                message = LibraryMessage(title: "Added \(entry.emoji) \(entry.title)", detail: "It's in the menu now.")
-            } catch {
-                message = LibraryMessage(title: "Couldn't add that game", detail: error.localizedDescription)
+            Task { @MainActor in
+                do {
+                    let entry = try await library.importGame(from: url)
+                    message = LibraryMessage(title: "Added \(entry.emoji) \(entry.title)", detail: "It's in the menu now.")
+                } catch {
+                    message = LibraryMessage(title: "Couldn't add that game", detail: error.localizedDescription)
+                }
             }
         }
     }
@@ -154,19 +156,31 @@ struct MenuView: View {
                     .font(.system(size: 64, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170, maximum: 190), spacing: 18)], spacing: 18) {
-                    ForEach(Array(library.games.enumerated()), id: \.element.id) { index, game in
-                        gameCard(game, index: index)
+                // Scrolls when there are more games than fit, so the controls below stay on screen.
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 170, maximum: 190), spacing: 18)], spacing: 18) {
+                        ForEach(Array(library.games.enumerated()), id: \.element.id) { index, game in
+                            gameCard(game, index: index)
+                        }
                     }
+                    .padding(.vertical, 6)
                 }
-                .frame(maxWidth: 1060)
+                .scrollIndicators(.automatic)
+                .frame(maxWidth: 1060, minHeight: 190, maxHeight: 400)
+                .layoutPriority(-1) // give up height before the controls do
 
                 HStack(spacing: 12) {
                     Button("➕ Import game…", action: importGame)
                         .help("Add a .jigglegame file")
-                    Text("Right-click an imported game to export or remove it.")
-                        .font(.callout)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .disabled(library.isBusy)
+                    if library.isBusy {
+                        ProgressView().controlSize(.small)
+                        Text("Adding game…").font(.callout).foregroundStyle(.white)
+                    } else {
+                        Text("Right-click an imported game to export or remove it.")
+                            .font(.callout)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
                 }
 
                 status
@@ -264,11 +278,13 @@ struct MenuView: View {
         panel.allowedContentTypes = [UTType(filenameExtension: GamePack.fileExtension) ?? .zip, .zip, .folder]
         panel.canChooseDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let entry = try library.importGame(from: url)
-            message = LibraryMessage(title: "Added \(entry.emoji) \(entry.title)", detail: "It's in the menu now.")
-        } catch {
-            message = LibraryMessage(title: "Couldn't add that game", detail: error.localizedDescription)
+        Task { @MainActor in
+            do {
+                let entry = try await library.importGame(from: url)
+                message = LibraryMessage(title: "Added \(entry.emoji) \(entry.title)", detail: "It's in the menu now.")
+            } catch {
+                message = LibraryMessage(title: "Couldn't add that game", detail: error.localizedDescription)
+            }
         }
     }
 
@@ -278,11 +294,13 @@ struct MenuView: View {
         panel.nameFieldStringValue = "\(game.title).\(GamePack.fileExtension)"
         panel.allowedContentTypes = [UTType(filenameExtension: GamePack.fileExtension) ?? .zip]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try library.export(game, to: url)
-            message = LibraryMessage(title: "Exported \(game.title)", detail: "Share \(url.lastPathComponent); double-click it to add it to Jiggle Jam.")
-        } catch {
-            message = LibraryMessage(title: "Couldn't export that game", detail: error.localizedDescription)
+        Task { @MainActor in
+            do {
+                try await library.export(game, to: url)
+                message = LibraryMessage(title: "Exported \(game.title)", detail: "Share \(url.lastPathComponent); double-click it to add it to Jiggle Jam.")
+            } catch {
+                message = LibraryMessage(title: "Couldn't export that game", detail: error.localizedDescription)
+            }
         }
     }
 
