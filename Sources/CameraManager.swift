@@ -2,34 +2,6 @@ import AVFoundation
 import Vision
 import Combine
 
-/// A body part that can pop things in a game.
-struct Popper {
-    enum Kind { case hand, foot }
-    var kind: Kind
-    /// Normalized image coordinates (0...1), already mirrored, origin bottom-left.
-    var point: CGPoint
-}
-
-typealias Joint = VNHumanBodyPoseObservation.JointName
-
-/// All confidently-tracked joints of one person (normalized, mirrored, origin bottom-left).
-typealias Body = [Joint: CGPoint]
-
-/// The latest body-tracking result, read by games every frame.
-struct PoseFrame {
-    var poppers: [Popper] = []
-    var bodies: [Body] = []
-    var peopleCount = 0
-    /// Someone is so close to the camera that their whole body no longer fits.
-    var tooClose = false
-    /// Hand centers from the dedicated hand tracker (only filled when hand tracking is on).
-    /// Normalized, mirrored, origin bottom-left. Works up close and with the body hidden.
-    var hands: [CGPoint] = []
-    var imageSize = CGSize(width: 1280, height: 720)
-    /// Camera timestamp in seconds; changes only when a new camera frame was analysed.
-    var timestamp: Double = 0
-}
-
 extension Notification.Name {
     static let cameraDidSwitch = Notification.Name("JiggleJam.cameraDidSwitch")
 }
@@ -41,6 +13,10 @@ final class CameraManager: NSObject, ObservableObject {
 
     @Published private(set) var devices: [AVCaptureDevice] = []
     @Published private(set) var currentDeviceID: String?
+    /// Camera the user just picked, while it's being attached; the picker shows this meanwhile.
+    @Published private(set) var switchingToID: String?
+    /// A problem worth telling the parent about (failed switch, iPhone disconnected…).
+    @Published private(set) var cameraNotice: String?
     @Published private(set) var authorization = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var peopleCount = 0
     @Published private(set) var tooClose = false
@@ -69,6 +45,7 @@ final class CameraManager: NSObject, ObservableObject {
     private var lastTooClose = false // videoQueue only
     private var statFrames = 0, statTrackingTime = 0.0, statStart = CACurrentMediaTime() // videoQueue only
     private var configured = false
+    private var fellBackFromIPhone = false
     private var observers: [NSObjectProtocol] = []
 
     /// Thread-safe snapshot of the most recent pose result.
@@ -104,15 +81,27 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    func select(_ id: String) {
+    /// Switches camera. The selection only changes once the new camera is attached; if that fails,
+    /// the previous camera is restored and `cameraNotice` explains what happened.
+    func select(_ id: String, automatic: Bool = false) {
         guard let device = devices.first(where: { $0.uniqueID == id }) else { return }
-        currentDeviceID = id
+        switchingToID = id
         sessionQueue.async {
             self.session.beginConfiguration()
-            self.attach(device)
+            let attached = self.attach(device)
             self.session.commitConfiguration()
             if !self.session.isRunning { self.session.startRunning() }
-            DispatchQueue.main.async { NotificationCenter.default.post(name: .cameraDidSwitch, object: nil) }
+            DispatchQueue.main.async {
+                self.switchingToID = nil
+                if attached {
+                    self.currentDeviceID = id
+                    if device.deviceType == .continuityCamera { self.fellBackFromIPhone = false }
+                    if !automatic { self.cameraNotice = nil }
+                } else {
+                    self.cameraNotice = "Couldn't switch to \(device.localizedName), so the previous camera is still on."
+                }
+                NotificationCenter.default.post(name: .cameraDidSwitch, object: nil)
+            }
         }
     }
 
@@ -134,11 +123,28 @@ final class CameraManager: NSObject, ObservableObject {
     var hasIPhone: Bool { devices.contains { $0.deviceType == .continuityCamera } }
 
     func refreshDevices() {
+        let previous = devices.first { $0.uniqueID == currentDeviceID }
         devices = discover()
         guard configured else { return }
+
         let currentStillThere = devices.contains { $0.uniqueID == currentDeviceID }
-        if !currentStillThere, let next = preferredDevice() {
-            select(next.uniqueID)
+        if !currentStillThere {
+            let lostIPhone = previous?.deviceType == .continuityCamera
+            if let next = preferredDevice() {
+                if lostIPhone {
+                    fellBackFromIPhone = true
+                    cameraNotice = "📱 iPhone camera disconnected, so the \(next.localizedName) is on for now. It will switch back when the iPhone returns."
+                }
+                select(next.uniqueID, automatic: true)
+            } else {
+                currentDeviceID = nil
+                cameraNotice = lostIPhone
+                    ? "📱 iPhone camera disconnected. Bring it close to the Mac, lock it, and click Refresh."
+                    : "No camera found. Connect one and click Refresh."
+            }
+        } else if fellBackFromIPhone, let phone = devices.first(where: { $0.deviceType == .continuityCamera }) {
+            cameraNotice = nil
+            select(phone.uniqueID, automatic: true)
         }
     }
 
@@ -156,17 +162,31 @@ final class CameraManager: NSObject, ObservableObject {
             self.videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
             self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
             if self.session.canAddOutput(self.videoOutput) { self.session.addOutput(self.videoOutput) }
-            if let device { self.attach(device) }
+            let attached = device.map { self.attach($0) } ?? false
+            if !attached {
+                DispatchQueue.main.async {
+                    self.currentDeviceID = nil
+                    self.cameraNotice = device == nil ? "No camera found. Connect one and click Refresh."
+                                                      : "Couldn't start the \(device!.localizedName). Pick another camera."
+                }
+            }
             self.session.commitConfiguration()
             self.session.startRunning()
             DispatchQueue.main.async { NotificationCenter.default.post(name: .cameraDidSwitch, object: nil) }
         }
     }
 
-    /// Call on sessionQueue between begin/commitConfiguration.
-    private func attach(_ device: AVCaptureDevice) {
-        session.inputs.forEach { session.removeInput($0) }
-        guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else { return }
+    /// Call on sessionQueue between begin/commitConfiguration. Returns false (and puts the
+    /// previous input back) if the new camera can't be used.
+    @discardableResult
+    private func attach(_ device: AVCaptureDevice) -> Bool {
+        guard let input = try? AVCaptureDeviceInput(device: device) else { return false }
+        let previous = session.inputs
+        previous.forEach { session.removeInput($0) }
+        guard session.canAddInput(input) else {
+            previous.forEach { if session.canAddInput($0) { session.addInput($0) } }
+            return false
+        }
         session.addInput(input)
         useSmallFormat(device)
         // Keep analysed frames un-mirrored; mirroring is applied in the coordinate math.
@@ -174,6 +194,7 @@ final class CameraManager: NSObject, ObservableObject {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = false
         }
+        return true
     }
 }
 
@@ -221,7 +242,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             tooClose: bodies.contains(where: Self.isTooClose),
             hands: hands,
             imageSize: size,
-            timestamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            timestamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds,
+            receivedAt: uptime()
         )
         lock.lock(); frame = next; lock.unlock()
 

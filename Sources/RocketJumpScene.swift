@@ -30,6 +30,8 @@ final class RocketJumpScene: GameScene {
     private var trackBottom: CGFloat { size.height * 0.12 }
     private var trackTop: CGFloat { size.height * 0.74 }
 
+    override func trackingDidResume() { jumper.reset() }
+
     override func didMove(to view: SKView) {
         backgroundColor = .clear
         rocket.zRotation = .pi / 4 // the emoji points up-right; make it point straight up

@@ -23,68 +23,111 @@ class GameScene: SKScene {
 
     var currentPose: PoseFrame { frameProvider?() ?? PoseFrame() }
 
+    /// Whether this frame has someone to play with. Hands-only games also accept just hands.
+    func hasPlayer(_ pose: PoseFrame) -> Bool { !pose.bodies.isEmpty }
+
+    enum PauseReason: Equatable {
+        case tooClose
+        case lookingForPlayer(cameraStalled: Bool)
+    }
+
     private var lastUpdate: TimeInterval = 0
     private var closeTime: TimeInterval = 0
     private var farTime: TimeInterval = 0
-    private var lastWarningSpeech: TimeInterval = 0
+    private var tooCloseActive = false
+    private var missingTime: TimeInterval = 0
+    private var lastPauseSpeech: TimeInterval = 0
     private var clock: TimeInterval = 0
-    private(set) var pausedForDistance = false
-    private var warning: SKNode?
+    private(set) var pauseReason: PauseReason?
+    private var overlay: SKNode?
+
+    /// How long nobody (or no fresh camera frame) can be seen before the game pauses.
+    private let lookingGrace: TimeInterval = 1.5
 
     // MARK: - Loop
 
-    /// Subclasses put their game logic in `tick`, which doesn't run while paused for distance.
+    /// Subclasses put their game logic in `tick`, which doesn't run while paused.
+    /// Stale camera frames never reach `tick` as input: the game sees an empty pose instead.
     override func update(_ currentTime: TimeInterval) {
         let dt = lastUpdate == 0 ? 1.0 / 60 : min(currentTime - lastUpdate, 1.0 / 20)
         lastUpdate = currentTime
         clock += dt
-        let pose = currentPose
-        updateDistance(pose, dt: dt)
-        if !pausedForDistance { tick(dt: dt, pose: pose) }
+
+        let raw = currentPose
+        let fresh = raw.isFresh()
+        let pose = fresh ? raw : raw.withoutInput
+        updatePause(pose, fresh: fresh, dt: dt)
+        if pauseReason == nil { tick(dt: dt, pose: pose) }
     }
 
     func tick(dt: TimeInterval, pose: PoseFrame) {}
 
     /// Hook for games with extra state to pause, such as music.
-    func distancePauseChanged(paused: Bool) {}
+    func pauseChanged(paused: Bool) {}
 
-    // MARK: - Too close
+    /// Called when play resumes after a pause: tracking may have changed (another player, a gap),
+    /// so games should reset their motion detectors and anything mid-move.
+    func trackingDidResume() {}
 
-    private func updateDistance(_ pose: PoseFrame, dt: TimeInterval) {
+    // MARK: - Pausing (too close / looking for the player)
+
+    private func updatePause(_ pose: PoseFrame, fresh: Bool, dt: TimeInterval) {
         if distanceWarningEnabled && needsFullBody && pose.tooClose {
             closeTime += dt; farTime = 0
         } else {
             farTime += dt; closeTime = 0
         }
-        if !pausedForDistance && closeTime > 0.5 {
-            setPausedForDistance(true)
-        } else if pausedForDistance && farTime > 1.0 {
-            setPausedForDistance(false)
+        if !tooCloseActive && closeTime > 0.5 { tooCloseActive = true }
+        if tooCloseActive && farTime > 1.0 { tooCloseActive = false }
+
+        let seen = fresh && hasPlayer(pose)
+        missingTime = seen ? 0 : missingTime + dt
+
+        let wanted: PauseReason?
+        if missingTime > lookingGrace {
+            wanted = .lookingForPlayer(cameraStalled: !fresh)
+        } else if tooCloseActive {
+            wanted = .tooClose
+        } else if case .lookingForPlayer = pauseReason, missingTime > 0 {
+            wanted = pauseReason // need a steady view before resuming
+        } else {
+            wanted = nil
         }
-        if pausedForDistance && clock - lastWarningSpeech > 6 {
-            lastWarningSpeech = clock
-            say(["Whoa, too close! Take a big step back!", "Back up, back up! I can't see your feet!"].randomElement()!)
+        if wanted != pauseReason { setPause(wanted) }
+
+        if let reason = pauseReason, clock - lastPauseSpeech > 7 {
+            lastPauseSpeech = clock
+            switch reason {
+            case .tooClose:
+                say(["Whoa, too close! Take a big step back!", "Back up, back up! I can't see your feet!"].randomElement()!)
+            case .lookingForPlayer:
+                say(["Where did you go? Come and play!", "I'm looking for you! Stand in front of the camera."].randomElement()!)
+            }
         }
     }
 
-    private func setPausedForDistance(_ paused: Bool) {
-        pausedForDistance = paused
-        for child in children where child !== warning { child.isPaused = paused }
-        if paused {
-            let node = makeWarning()
-            warning = node
+    private func setPause(_ reason: PauseReason?) {
+        let wasPaused = pauseReason != nil
+        pauseReason = reason
+        for child in children where child !== overlay { child.isPaused = reason != nil }
+
+        overlay?.run(.sequence([.fadeOut(withDuration: 0.2), .removeFromParent()]))
+        overlay = nil
+        if let reason {
+            let node = makeOverlay(for: reason)
+            overlay = node
             addChild(node)
             node.alpha = 0
             node.run(.fadeIn(withDuration: 0.2))
-        } else {
-            warning?.run(.sequence([.fadeOut(withDuration: 0.2), .removeFromParent()]))
-            warning = nil
-            say("Perfect! Let's play!")
+            lastPauseSpeech = clock - 6 // speak about a second after pausing, not instantly
+        } else if wasPaused {
+            say(["There you are! Let's play!", "Perfect! Let's play!"].randomElement()!)
+            trackingDidResume()
         }
-        distancePauseChanged(paused: paused)
+        if wasPaused != (reason != nil) { pauseChanged(paused: reason != nil) }
     }
 
-    private func makeWarning() -> SKNode {
+    private func makeOverlay(for reason: PauseReason) -> SKNode {
         let node = SKNode()
         node.zPosition = 100
 
@@ -93,23 +136,37 @@ class GameScene: SKScene {
         dim.strokeColor = .clear
         node.addChild(dim)
 
-        let title = makeLabel("✋ Too close!", size: 0.13)
+        let (titleText, subtitleText, icon): (String, String, String)
+        switch reason {
+        case .tooClose:
+            (titleText, subtitleText, icon) = ("✋ Too close!", "Take a big step back 👣", "🧒")
+        case .lookingForPlayer(let stalled):
+            (titleText, subtitleText, icon) = stalled
+                ? ("👀 Looking for you…", "The camera stopped. Check the iPhone is close and locked.", "📷")
+                : ("👀 Looking for you…", "Stand where the camera can see you", "🧒")
+        }
+
+        let title = makeLabel(titleText, size: 0.13)
         title.position = CGPoint(x: size.width / 2, y: size.height * 0.68)
         node.addChild(title)
 
-        let subtitle = makeLabel("Take a big step back 👣", size: 0.07)
+        let subtitle = makeLabel(subtitleText, size: 0.06)
         subtitle.position = CGPoint(x: size.width / 2, y: size.height * 0.5)
         node.addChild(subtitle)
 
-        // A kid shrinking into the distance = "move back".
-        let kid = makeLabel("🧒", size: 0.16)
-        kid.position = CGPoint(x: size.width / 2, y: size.height * 0.27)
-        node.addChild(kid)
-        kid.run(.repeatForever(.sequence([
-            .group([.scale(to: 0.45, duration: 1.0), .fadeAlpha(to: 0.6, duration: 1.0)]),
-            .wait(forDuration: 0.3),
-            .group([.scale(to: 1, duration: 0), .fadeAlpha(to: 1, duration: 0)])
-        ])))
+        let figure = makeLabel(icon, size: 0.16)
+        figure.position = CGPoint(x: size.width / 2, y: size.height * 0.27)
+        node.addChild(figure)
+        if case .tooClose = reason {
+            // A kid shrinking into the distance = "move back".
+            figure.run(.repeatForever(.sequence([
+                .group([.scale(to: 0.45, duration: 1.0), .fadeAlpha(to: 0.6, duration: 1.0)]),
+                .wait(forDuration: 0.3),
+                .group([.scale(to: 1, duration: 0), .fadeAlpha(to: 1, duration: 0)])
+            ])))
+        } else {
+            figure.run(.repeatForever(.sequence([.moveBy(x: -30, y: 0, duration: 0.6), .moveBy(x: 30, y: 0, duration: 0.6)])))
+        }
         return node
     }
 

@@ -23,6 +23,10 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
 If a player gets so close that their feet leave the frame, the game pauses with a
 "take a big step back" warning. Turn it off with **Warn when too close** in the menu.
 
+If nobody can be seen for a moment, or the camera stops sending frames, the game pauses on
+"👀 Looking for you…" and picks up again with "There you are!" once the player is back. Stale
+camera frames are never used as input.
+
 ## Run it
 
 Requires macOS 14+, Xcode, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
@@ -31,6 +35,15 @@ Requires macOS 14+, Xcode, and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 xcodegen generate
 open JiggleJam.xcodeproj   # then ⌘R
 ```
+
+## Tests
+
+```sh
+xcodebuild -project JiggleJam.xcodeproj -scheme JiggleJam test
+```
+
+`Tests/MotionDetectorTests.swift` replays synthetic players through the real jump and walk
+detectors: jumps, squats, marching, single-knee lifts, tracking gaps and player swaps.
 
 ## Playing on the TV
 
@@ -44,6 +57,7 @@ open JiggleJam.xcodeproj   # then ⌘R
 
 | File | Role |
 | --- | --- |
+| `Sources/PoseTypes.swift` | Pose data passed from the camera to games, with a freshness check |
 | `Sources/CameraManager.swift` | Capture session, camera picking, Vision body-pose per frame → hand/foot points |
 | `Sources/CameraPreview.swift` | Mirrored live camera background |
 | `Sources/GameScene.swift` | Base class for games: pose input, coordinate mapping, speech, confetti |
@@ -52,7 +66,7 @@ open JiggleJam.xcodeproj   # then ⌘R
 | `Sources/RocketJumpScene.swift` | Rocket Jump |
 | `Sources/DrivingScene.swift` | Vroom Vroom: plate steering from wrist tilt, scrolling road (tuning at top) |
 | `Sources/FoxTrailScene.swift` | Fox Trail: side-scroller physics, crates, fruit, levels |
-| `Sources/MotionDetectors.swift` | Shared `JumpDetector` and `WalkDetector` (tuning at top of each) |
+| `Sources/MotionDetectors.swift` | Shared `PlayerTracker`, `JumpDetector` and `WalkDetector` (tuning at top of each) |
 | `Sources/DanceMusic.swift` | Tiny synthesized chiptune band, so no audio files are needed |
 | `Sources/JiggleJamApp.swift` | App, parent menu, game screen |
 

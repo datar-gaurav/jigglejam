@@ -26,3 +26,27 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: NO
+  JiggleJamTests:
+    type: bundle.unit-test
+    platform: macOS
+    # Pure logic only (no app host): pose types + motion detectors, driven by synthetic poses.
+    sources:
+      - path: Tests
+      - path: Sources/PoseTypes.swift
+      - path: Sources/MotionDetectors.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jigglejam.tests
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  JiggleJam:
+    build:
+      targets:
+        JiggleJam: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [JiggleJamTests]

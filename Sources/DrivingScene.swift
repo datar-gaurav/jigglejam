@@ -14,6 +14,16 @@ final class DrivingScene: GameScene {
 
     override var needsFullBody: Bool { false }    // only hands matter here
     override var wantsHandTracking: Bool { true }
+    override func hasPlayer(_ pose: PoseFrame) -> Bool { !pose.bodies.isEmpty || !pose.hands.isEmpty }
+
+    override func trackingDidResume() {
+        steerFilter = OneEuroFilter(minCutoff: 0.9, beta: 0.6)
+        lastReading = nil
+        lastHandTrackerTime = -10
+        driverTracker.reset()
+        neutralSamples.removeAll() // re-learn "straight" from how the wheel is held now
+    }
+
     override var debugText: String { String(format: "steer %+.2f", steer) }
 
     private final class RoadItem {
@@ -42,6 +52,9 @@ final class DrivingScene: GameScene {
     private var lastFrameTimestamp: Double = 0
     private var lastHandTrackerTime: TimeInterval = -10
     private var lastReading: SteeringReading?
+    private let driverTracker = PlayerTracker()
+    private var neutralSamples: [CGFloat] = []
+    private var neutralAngle: CGFloat = 0
     private var carX: CGFloat = 0
     private var carSpeed: CGFloat = 0
     private var handsMissing: TimeInterval = 0
@@ -230,9 +243,10 @@ final class DrivingScene: GameScene {
 
         // Steering: read the camera only on new frames, filter, then ease toward it every frame.
         if pose.timestamp != lastFrameTimestamp {
-            let frameDT = lastFrameTimestamp > 0 ? max(pose.timestamp - lastFrameTimestamp, 1.0 / 120) : 1.0 / 30
+            let gap = lastFrameTimestamp > 0 ? pose.timestamp - lastFrameTimestamp : 0
+            let frameDT = gap > 0 ? max(gap, 1.0 / 120) : 1.0 / 30
             lastFrameTimestamp = pose.timestamp
-            var reading = plateSteering(pose)
+            var reading = plateSteering(pose, frameGap: gap)
             if reading?.fromHandTracker == true {
                 lastHandTrackerTime = now
             } else if now - lastHandTrackerTime < 0.4 {
@@ -296,26 +310,45 @@ final class DrivingScene: GameScene {
     /// Steering from the tilt of the line between the two hands: right hand lower = turn right.
     /// Prefers the dedicated hand tracker (robust up close, plate in front of the body);
     /// falls back to body wrists, then elbows.
-    private func plateSteering(_ pose: PoseFrame) -> SteeringReading? {
+    private func plateSteering(_ pose: PoseFrame, frameGap: Double) -> SteeringReading? {
+        // Lock onto one driver, and only accept hands that belong to them.
+        let driver = driverTracker.update(pose.bodies, frameGap: frameGap)
+        func belongsToDriver(_ p: CGPoint) -> Bool {
+            guard let driver else { return true } // up close the body may not be tracked; can't check
+            return PlayerTracker.bounds(of: driver).insetBy(dx: -0.12, dy: -0.12).contains(p)
+        }
+
         var pair: (CGPoint, CGPoint)?
         var fromHands = false
-        if pose.hands.count >= 2, hypot(pose.hands[0].x - pose.hands[1].x, pose.hands[0].y - pose.hands[1].y) > 0.04 {
-            pair = (pose.hands[0], pose.hands[1])
-            fromHands = true
-        } else {
-            let pairs: [(CGPoint, CGPoint)] = pose.bodies.compactMap { body in
-                guard let a = body[.leftWrist] ?? body[.leftElbow], let b = body[.rightWrist] ?? body[.rightElbow] else { return nil }
-                return (a, b)
+        if pose.hands.count >= 2 {
+            let (h0, h1) = (pose.hands[0], pose.hands[1])
+            let separation = PlayerTracker.distance(h0, h1)
+            // Two hands on one plate are close-ish; two people's hands are usually far apart.
+            if separation > 0.04, separation < 0.6, belongsToDriver(h0), belongsToDriver(h1) {
+                pair = (h0, h1)
+                fromHands = true
             }
-            // Several people: use the hands farthest apart (whoever is holding the plate out).
-            pair = pairs.max { hypot($0.1.x - $0.0.x, $0.1.y - $0.0.y) < hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
+        }
+        if pair == nil, let driver,
+           let a = driver[.leftWrist] ?? driver[.leftElbow], let b = driver[.rightWrist] ?? driver[.rightElbow] {
+            pair = (a, b)
         }
         guard let (a, b) = pair else { return nil }
         let (left, right) = a.x < b.x ? (a, b) : (b, a)
 
         // Measure the angle on screen so the camera's aspect ratio doesn't distort it.
         let pl = scenePoint(left, imageSize: pose.imageSize), pr = scenePoint(right, imageSize: pose.imageSize)
-        let angle = atan2(pr.y - pl.y, pr.x - pl.x)
+        let rawAngle = atan2(pr.y - pl.y, pr.x - pl.x)
+
+        // "Straight" is however the wheel is held for the first moment of driving (if roughly level).
+        if neutralSamples.count < 20 {
+            neutralSamples.append(rawAngle)
+            if neutralSamples.count == 20 {
+                let mean = neutralSamples.reduce(0, +) / 20
+                neutralAngle = abs(mean) < 0.35 ? mean : 0
+            }
+        }
+        let angle = rawAngle - neutralAngle
         var value: CGFloat = 0
         if abs(angle) > deadZone {
             let effective = angle > 0 ? angle - deadZone : angle + deadZone

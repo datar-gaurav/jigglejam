@@ -184,7 +184,7 @@ struct MenuView: View {
 
                 HStack(spacing: 16) {
                     Picker("Camera", selection: Binding(
-                        get: { camera.currentDeviceID ?? "" },
+                        get: { camera.switchingToID ?? camera.currentDeviceID ?? "" },
                         set: { camera.select($0) }
                     )) {
                         ForEach(camera.devices, id: \.uniqueID) { device in
@@ -198,6 +198,13 @@ struct MenuView: View {
                         .toggleStyle(.switch)
                         .foregroundStyle(.white)
                     Button("Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                }
+
+                if let notice = camera.cameraNotice {
+                    Text(notice)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.yellow)
+                        .multilineTextAlignment(.center)
                 }
 
                 if !camera.stats.isEmpty {

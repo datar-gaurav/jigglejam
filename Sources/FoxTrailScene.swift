@@ -59,6 +59,12 @@ final class FoxTrailScene: GameScene {
 
     // MARK: - Setup
 
+    override func trackingDidResume() {
+        jumper.reset()
+        walker.reset()
+        walkSpeed = 0
+    }
+
     override func didMove(to view: SKView) {
         backgroundColor = NSColor(calibratedRed: 0.55, green: 0.8, blue: 1, alpha: 1)
         backdrop.zPosition = 0

@@ -1,19 +1,14 @@
 import AVFoundation
 
 /// A tiny built-in chiptune band (melody, bass, kick, hi-hat), so no music files are needed.
-/// `play()` / `stop()` fade in and out quickly; stopping is the "FREEZE!" cue.
+/// Each song is rendered once into a looping buffer up front, and playback goes through
+/// `AVAudioPlayerNode`, so the game never shares mutable state with the audio render thread.
+/// `stop()` pauses mid-song (the "FREEZE!" cue) and `play()` carries on from there.
 final class DanceMusic {
-    private final class State {
-        var playing = false
-        var gain: Float = 0
-        var time: Double = 0
-        var song = 0
-        var noise: UInt32 = 22222
-    }
-
     private let engine = AVAudioEngine()
-    private let state = State()
-    private var source: AVAudioSourceNode?
+    private let player = AVAudioPlayerNode()
+    private var songs: [AVAudioPCMBuffer] = []
+    private var currentSong = -1
 
     // MIDI notes per eighth note (0 = rest). Bright, bouncy, C-major pentatonic.
     private static let melodies: [[Int]] = [
@@ -25,81 +20,81 @@ final class DanceMusic {
     private static let bpm = 126.0
 
     init() {
-        let rate = engine.outputNode.inputFormat(forBus: 0).sampleRate
+        let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate
         let sampleRate = rate > 0 ? rate : 44_100
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { return }
-        let state = self.state
-        let dt = 1.0 / sampleRate
-
-        let node = AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList -> OSStatus in
-            let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            for frame in 0..<Int(frameCount) {
-                let target: Float = state.playing ? 1 : 0
-                state.gain += (target - state.gain) * 0.004
-                var sample: Float = 0
-                if state.gain > 0.0005 {
-                    sample = DanceMusic.render(state) * state.gain
-                    state.time += dt
-                }
-                for buffer in buffers {
-                    buffer.mData?.assumingMemoryBound(to: Float.self)[frame] = sample
-                }
-            }
-            return noErr
-        }
-        source = node
-        engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: format)
+        songs = Self.melodies.compactMap { Self.render(melody: $0, format: format) }
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
         engine.mainMixerNode.outputVolume = 0.6
         try? engine.start()
     }
 
     func play(newSong: Bool = false) {
-        if newSong { state.song = Int.random(in: 0..<Self.melodies.count) }
+        guard !songs.isEmpty else { return }
         if !engine.isRunning { try? engine.start() }
-        state.playing = true
+        if newSong || currentSong < 0 {
+            let next = currentSong < 0 ? 0 : Int.random(in: 0..<songs.count)
+            if next != currentSong || currentSong < 0 {
+                currentSong = next
+                player.stop() // clears the old schedule
+                player.scheduleBuffer(songs[next], at: nil, options: .loops)
+            }
+        }
+        player.play()
     }
 
-    func stop() { state.playing = false }
+    func stop() { player.pause() }
 
     func shutdown() {
-        state.playing = false
+        player.stop()
         engine.stop()
     }
 
+    // MARK: - Offline synthesis
+
     private static func freq(_ midi: Int) -> Double { 440 * pow(2, Double(midi - 69) / 12) }
 
-    private static func render(_ s: State) -> Float {
+    /// One seamless loop: 16 eighth notes of melody over 8 quarter notes of bass.
+    private static func render(melody: [Int], format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let sampleRate = format.sampleRate
         let eighth = 60 / bpm / 2
-        let step = Int(s.time / eighth)
-        let inStep = s.time - Double(step) * eighth
+        let frames = AVAudioFrameCount((Double(melody.count) * eighth * sampleRate).rounded())
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
+              let out = buffer.floatChannelData?[0] else { return nil }
+        buffer.frameLength = frames
+
+        var noise: UInt32 = 22222
         let twoPi = 2 * Double.pi
-        var out = 0.0
+        for i in 0..<Int(frames) {
+            let t = Double(i) / sampleRate
+            let step = Int(t / eighth)
+            let inStep = t - Double(step) * eighth
+            var sample = 0.0
 
-        // Melody: soft square wave with a plucky decay.
-        let melody = melodies[s.song]
-        let note = melody[step % melody.count]
-        if note > 0 {
-            let phase = (s.time * freq(note)).truncatingRemainder(dividingBy: 1)
-            out += (phase < 0.5 ? 1 : -1) * 0.09 * exp(-inStep * 7)
+            // Melody: soft square wave with a plucky decay.
+            let note = melody[step % melody.count]
+            if note > 0 {
+                let phase = (t * freq(note)).truncatingRemainder(dividingBy: 1)
+                sample += (phase < 0.5 ? 1 : -1) * 0.09 * exp(-inStep * 7)
+            }
+
+            // Bass: triangle wave on every quarter note.
+            let quarter = step / 2
+            let inQuarter = t - Double(quarter) * eighth * 2
+            let bp = (t * freq(bass[quarter % bass.count])).truncatingRemainder(dividingBy: 1)
+            sample += (4 * abs(bp - 0.5) - 1) * 0.16 * exp(-inQuarter * 3)
+
+            // Kick on every beat: a falling sine "boom".
+            sample += sin(twoPi * (55 * inQuarter + 120 * (1 - exp(-inQuarter * 30)) / 30)) * 0.35 * exp(-inQuarter * 14)
+
+            // Hi-hat on the off-beats: a short burst of noise.
+            if step % 2 == 1 {
+                noise = noise &* 1_664_525 &+ 1_013_904_223
+                sample += (Double(noise) / Double(UInt32.max) * 2 - 1) * 0.06 * exp(-inStep * 60)
+            }
+            out[i] = Float(sample)
         }
-
-        // Bass: triangle wave on every quarter note.
-        let quarter = step / 2
-        let inQuarter = s.time - Double(quarter) * eighth * 2
-        let bassNote = bass[quarter % bass.count]
-        let bp = (s.time * freq(bassNote)).truncatingRemainder(dividingBy: 1)
-        out += (4 * abs(bp - 0.5) - 1) * 0.16 * exp(-inQuarter * 3)
-
-        // Kick on every beat: a falling sine "boom".
-        out += sin(twoPi * (55 * inQuarter + 120 * (1 - exp(-inQuarter * 30)) / 30)) * 0.35 * exp(-inQuarter * 14)
-
-        // Hi-hat on the off-beats: a short burst of noise.
-        if step % 2 == 1 {
-            s.noise = s.noise &* 1_664_525 &+ 1_013_904_223
-            let n = Double(s.noise) / Double(UInt32.max) * 2 - 1
-            out += n * 0.06 * exp(-inStep * 60)
-        }
-        return Float(out)
+        return buffer
     }
 }

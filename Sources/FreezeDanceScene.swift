@@ -61,7 +61,18 @@ final class FreezeDanceScene: GameScene {
         hintLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.3)
     }
 
-    override func distancePauseChanged(paused: Bool) {
+    override func trackingDidResume() {
+        previousBodies = []
+        previousTimestamp = 0
+        motion = 0
+        // Don't judge a freeze that was interrupted; just start dancing again.
+        switch phase {
+        case .freezing, .result: startDancing()
+        default: break
+        }
+    }
+
+    override func pauseChanged(paused: Bool) {
         if paused {
             music.stop()
         } else if case .dancing = phase {
