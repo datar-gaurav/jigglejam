@@ -10,6 +10,11 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
   No way to lose; a spoken cheer and confetti every 10 pops.
 - **Freeze Dance** — built-in music plays and sparkles fly off the hands while dancing; when the
   music stops, freeze! Holding still earns a star. A wobbly freeze is just "let's try again".
+- **Rocket Jump** — every jump moves the rocket one step closer to the Moon (10 jumps), then
+  Saturn, then the stars. Jumps are counted out loud; no timing needed.
+
+If a player gets so close that their feet leave the frame, the game pauses with a
+"take a big step back" warning. Turn it off with **Warn when too close** in the menu.
 
 ## Run it
 
@@ -25,7 +30,7 @@ open JiggleJam.xcodeproj   # then ⌘R
 1. **Camera:** pick it in the menu. An iPhone appears automatically as a Continuity Camera
    (same Apple ID, Wi‑Fi + Bluetooth on). Mount it in landscape below/above the TV.
 2. **TV:** Control Center → Screen Mirroring → your Apple TV / AirPlay TV.
-3. Click **Full Screen**, press **1** or **2** (or click a game) to start, **Esc** to go back to the menu.
+3. Click **Full Screen**, press **1**, **2** or **3** (or click a game) to start, **Esc** to go back to the menu.
 4. Stand 2–3 m back so the camera sees the whole body (the menu tells you when it does).
 
 ## How it works
@@ -37,5 +42,6 @@ open JiggleJam.xcodeproj   # then ⌘R
 | `Sources/GameScene.swift` | Base class for games: pose input, coordinate mapping, speech, confetti |
 | `Sources/BubbleScene.swift` | Bubble Pop |
 | `Sources/FreezeDanceScene.swift` | Freeze Dance: phases, motion/stillness detection (tuning constants at top) |
+| `Sources/RocketJumpScene.swift` | Rocket Jump: jump detection from hip rise vs. torso length (tuning at top) |
 | `Sources/DanceMusic.swift` | Tiny synthesized chiptune band, so no audio files are needed |
 | `Sources/JiggleJamApp.swift` | App, parent menu, game screen |

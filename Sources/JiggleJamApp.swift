@@ -7,20 +7,21 @@ struct JiggleJamApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 960, minHeight: 540)
+                .frame(minWidth: 1024, minHeight: 600)
         }
         .windowStyle(.hiddenTitleBar)
     }
 }
 
 enum Game: String, CaseIterable, Identifiable {
-    case bubblePop, freezeDance
+    case bubblePop, freezeDance, rocketJump
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .bubblePop: return "Bubble Pop"
         case .freezeDance: return "Freeze Dance"
+        case .rocketJump: return "Rocket Jump"
         }
     }
 
@@ -28,6 +29,7 @@ enum Game: String, CaseIterable, Identifiable {
         switch self {
         case .bubblePop: return "🫧"
         case .freezeDance: return "🥶"
+        case .rocketJump: return "🚀"
         }
     }
 
@@ -35,6 +37,7 @@ enum Game: String, CaseIterable, Identifiable {
         switch self {
         case .bubblePop: return .pink
         case .freezeDance: return .blue
+        case .rocketJump: return .orange
         }
     }
 
@@ -43,6 +46,7 @@ enum Game: String, CaseIterable, Identifiable {
         switch self {
         case .bubblePop: scene = BubbleScene(size: CGSize(width: 1280, height: 720))
         case .freezeDance: scene = FreezeDanceScene(size: CGSize(width: 1280, height: 720))
+        case .rocketJump: scene = RocketJumpScene(size: CGSize(width: 1280, height: 720))
         }
         scene.scaleMode = .resizeFill
         return scene
@@ -142,7 +146,7 @@ struct MenuView: View {
                                 Text(game.emoji).font(.system(size: 96))
                                 Text(game.title).font(.system(size: 34, weight: .bold, design: .rounded))
                             }
-                            .frame(width: 280, height: 220)
+                            .frame(width: 250, height: 210)
                             .background(RoundedRectangle(cornerRadius: 32).fill(game.color.gradient))
                             .foregroundStyle(.white)
                         }
