@@ -7,14 +7,14 @@ struct JiggleJamApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 1024, minHeight: 600)
+                .frame(minWidth: 1100, minHeight: 620)
         }
         .windowStyle(.hiddenTitleBar)
     }
 }
 
 enum Game: String, CaseIterable, Identifiable {
-    case bubblePop, freezeDance, rocketJump, driving
+    case bubblePop, freezeDance, rocketJump, driving, foxTrail
     var id: String { rawValue }
 
     var title: String {
@@ -23,6 +23,7 @@ enum Game: String, CaseIterable, Identifiable {
         case .freezeDance: return "Freeze Dance"
         case .rocketJump: return "Rocket Jump"
         case .driving: return "Vroom Vroom"
+        case .foxTrail: return "Fox Trail"
         }
     }
 
@@ -32,6 +33,7 @@ enum Game: String, CaseIterable, Identifiable {
         case .freezeDance: return "🥶"
         case .rocketJump: return "🚀"
         case .driving: return "🚗"
+        case .foxTrail: return "🦊"
         }
     }
 
@@ -41,11 +43,12 @@ enum Game: String, CaseIterable, Identifiable {
         case .freezeDance: return .blue
         case .rocketJump: return .orange
         case .driving: return .green
+        case .foxTrail: return .purple
         }
     }
 
-    /// Driving draws its own world; the camera still runs for tracking, just not on screen.
-    var showsCamera: Bool { self != .driving }
+    /// These games draw their own world; the camera still runs for tracking, shown in a small window.
+    var showsCamera: Bool { self != .driving && self != .foxTrail }
 
     func makeScene() -> GameScene {
         let scene: GameScene
@@ -54,6 +57,7 @@ enum Game: String, CaseIterable, Identifiable {
         case .freezeDance: scene = FreezeDanceScene(size: CGSize(width: 1280, height: 720))
         case .rocketJump: scene = RocketJumpScene(size: CGSize(width: 1280, height: 720))
         case .driving: scene = DrivingScene(size: CGSize(width: 1280, height: 720))
+        case .foxTrail: scene = FoxTrailScene(size: CGSize(width: 1280, height: 720))
         }
         scene.scaleMode = .resizeFill
         return scene
@@ -159,14 +163,14 @@ struct MenuView: View {
                     .font(.system(size: 64, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
 
-                HStack(spacing: 28) {
+                HStack(spacing: 20) {
                     ForEach(Array(Game.allCases.enumerated()), id: \.element) { index, game in
                         Button { onPlay(game) } label: {
                             VStack(spacing: 10) {
-                                Text(game.emoji).font(.system(size: 96))
-                                Text(game.title).font(.system(size: 34, weight: .bold, design: .rounded))
+                                Text(game.emoji).font(.system(size: 80))
+                                Text(game.title).font(.system(size: 28, weight: .bold, design: .rounded))
                             }
-                            .frame(width: 220, height: 200)
+                            .frame(width: 190, height: 190)
                             .background(RoundedRectangle(cornerRadius: 32).fill(game.color.gradient))
                             .foregroundStyle(.white)
                         }
@@ -247,7 +251,7 @@ struct MenuView: View {
 // MARK: - Tracking window
 
 /// Small live camera view with what the trackers see drawn on top, for games that hide the camera.
-/// Big green dots: hands (hand tracker). Small yellow dots: wrists/elbows (body tracker).
+/// Big green dots: hands (hand tracker). Small yellow dots: body joints (body tracker).
 struct TrackingWindow: View {
     let camera: CameraManager
     let scene: GameScene
@@ -270,9 +274,7 @@ struct TrackingWindow: View {
                     }
 
                     for body in frame.bodies {
-                        for joint in [Joint.leftWrist, .rightWrist, .leftElbow, .rightElbow] {
-                            if let p = body[joint] { dot(p, 5, .yellow) }
-                        }
+                        for (_, p) in body { dot(p, 4, .yellow) }
                     }
                     if frame.hands.count >= 2 {
                         var line = Path()

@@ -4,23 +4,12 @@ import AppKit
 /// Rocket Jump: every jump pushes the rocket one step closer to the Moon.
 /// No timing or obstacles: each jump counts, the game counts out loud, and arriving is a party.
 final class RocketJumpScene: GameScene {
-    // Tuning. Jumps are measured as hip rise relative to the player's torso length,
-    // so it works the same near or far, for kids or grown-ups.
-    private let takeoffRise: CGFloat = 0.22   // hips this far above standing height = jump
-    private let landingRise: CGFloat = 0.08   // back below this = landed
-    private let minJumpGap: TimeInterval = 0.35
+    // Jump sensitivity lives in JumpDetector (MotionDetectors.swift).
+    private let jumper = JumpDetector()
     private let jumpsPerTrip = 10
     private let destinations: [(emoji: String, name: String)] = [("🌙", "the Moon"), ("🪐", "Saturn"), ("⭐️", "the stars")]
 
     private var now: TimeInterval = 0
-
-    // Jump detection state
-    private var trackedCenter: CGPoint?
-    private var standingHip: CGFloat?
-    private var airborne = false
-    private var airborneSince: TimeInterval = 0
-    private var lastJump: TimeInterval = -10
-    private var lastTimestamp: Double = 0
 
     // Game state
     private var jumps = 0
@@ -97,77 +86,17 @@ final class RocketJumpScene: GameScene {
 
     override func tick(dt: TimeInterval, pose: PoseFrame) {
         now += dt
-        detectJump(pose)
+        if jumper.update(pose, now: now), let body = jumper.player {
+            jumped(body: body, imageSize: pose.imageSize)
+        }
 
         let celebrating = now < celebratingUntil
         promptLabel.alpha += ((celebrating ? 0 : 1) - promptLabel.alpha) * 0.15
 
-        if !celebrating, pose.peopleCount > 0, now - lastJump > 5, now - lastNudge > 8 {
+        if !celebrating, pose.peopleCount > 0, now - jumper.lastJump > 5, now - lastNudge > 8 {
             lastNudge = now
             say(["Jump! Jump!", "Big jump!", "Jump like a kangaroo!", "Can you jump?"].randomElement()!)
         }
-    }
-
-    // MARK: - Jump detection
-
-    private func detectJump(_ pose: PoseFrame) {
-        guard pose.timestamp != lastTimestamp else { return } // only on new camera frames
-        lastTimestamp = pose.timestamp
-
-        guard let body = pickPlayer(pose.bodies),
-              let hip = hipY(body),
-              let neck = body[.neck],
-              case let torso = neck.y - hip, torso > 0.03 else { return }
-
-        guard let standing = standingHip else { standingHip = hip; return }
-        let rise = (hip - standing) / torso
-
-        if airborne {
-            if rise < landingRise {
-                airborne = false
-            } else if now - airborneSince > 1.5 {
-                // Stuck "in the air" (stepped onto something, camera moved): re-learn standing height.
-                airborne = false
-                standingHip = hip
-            }
-        } else if rise > takeoffRise, now - lastJump > minJumpGap {
-            airborne = true
-            airborneSince = now
-            lastJump = now
-            jumped(body: body, imageSize: pose.imageSize)
-        } else {
-            // Slowly follow the standing height as the player moves around.
-            standingHip = standing + (hip - standing) * 0.08
-        }
-    }
-
-    private func hipY(_ body: Body) -> CGFloat? {
-        if let l = body[.leftHip], let r = body[.rightHip] { return (l.y + r.y) / 2 }
-        return body[.root]?.y ?? body[.leftHip]?.y ?? body[.rightHip]?.y
-    }
-
-    private func center(_ body: Body) -> CGPoint {
-        let sum = body.values.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.x, y: $0.y + $1.y) }
-        return CGPoint(x: sum.x / CGFloat(max(body.count, 1)), y: sum.y / CGFloat(max(body.count, 1)))
-    }
-
-    /// Stick with the same player across frames; pick the most visible one at the start.
-    private func pickPlayer(_ bodies: [Body]) -> Body? {
-        let candidates = bodies.filter { $0.count >= 6 }
-        let chosen: Body?
-        if let last = trackedCenter {
-            chosen = candidates.min { hypot(center($0).x - last.x, center($0).y - last.y) < hypot(center($1).x - last.x, center($1).y - last.y) }
-        } else {
-            chosen = candidates.max { $0.count < $1.count }
-        }
-        if let chosen {
-            let c = center(chosen)
-            if let last = trackedCenter, hypot(c.x - last.x, c.y - last.y) > 0.25 { standingHip = nil } // switched player
-            trackedCenter = c
-        } else {
-            trackedCenter = nil
-        }
-        return chosen
     }
 
     // MARK: - Game
