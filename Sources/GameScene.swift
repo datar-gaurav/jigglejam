@@ -12,6 +12,9 @@ class GameScene: SKScene {
     /// When on, the game pauses with a "step back" warning if a player gets too close.
     var distanceWarningEnabled = true
 
+    /// Games that need feet in view get the too-close warning; hands-only games opt out.
+    var needsFullBody: Bool { true }
+
     var currentPose: PoseFrame { frameProvider?() ?? PoseFrame() }
 
     private var lastUpdate: TimeInterval = 0
@@ -42,7 +45,7 @@ class GameScene: SKScene {
     // MARK: - Too close
 
     private func updateDistance(_ pose: PoseFrame, dt: TimeInterval) {
-        if distanceWarningEnabled && pose.tooClose {
+        if distanceWarningEnabled && needsFullBody && pose.tooClose {
             closeTime += dt; farTime = 0
         } else {
             farTime += dt; closeTime = 0

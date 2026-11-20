@@ -14,7 +14,7 @@ struct JiggleJamApp: App {
 }
 
 enum Game: String, CaseIterable, Identifiable {
-    case bubblePop, freezeDance, rocketJump
+    case bubblePop, freezeDance, rocketJump, driving
     var id: String { rawValue }
 
     var title: String {
@@ -22,6 +22,7 @@ enum Game: String, CaseIterable, Identifiable {
         case .bubblePop: return "Bubble Pop"
         case .freezeDance: return "Freeze Dance"
         case .rocketJump: return "Rocket Jump"
+        case .driving: return "Vroom Vroom"
         }
     }
 
@@ -30,6 +31,7 @@ enum Game: String, CaseIterable, Identifiable {
         case .bubblePop: return "🫧"
         case .freezeDance: return "🥶"
         case .rocketJump: return "🚀"
+        case .driving: return "🚗"
         }
     }
 
@@ -38,8 +40,12 @@ enum Game: String, CaseIterable, Identifiable {
         case .bubblePop: return .pink
         case .freezeDance: return .blue
         case .rocketJump: return .orange
+        case .driving: return .green
         }
     }
+
+    /// Driving draws its own world; the camera still runs for tracking, just not on screen.
+    var showsCamera: Bool { self != .driving }
 
     func makeScene() -> GameScene {
         let scene: GameScene
@@ -47,6 +53,7 @@ enum Game: String, CaseIterable, Identifiable {
         case .bubblePop: scene = BubbleScene(size: CGSize(width: 1280, height: 720))
         case .freezeDance: scene = FreezeDanceScene(size: CGSize(width: 1280, height: 720))
         case .rocketJump: scene = RocketJumpScene(size: CGSize(width: 1280, height: 720))
+        case .driving: scene = DrivingScene(size: CGSize(width: 1280, height: 720))
         }
         scene.scaleMode = .resizeFill
         return scene
@@ -76,6 +83,7 @@ struct GameView: View {
     @ObservedObject var camera: CameraManager
     let onExit: () -> Void
     @State private var scene: GameScene
+    private let showsCamera: Bool
     @State private var showStats = false
     @AppStorage("warnTooClose") private var warnTooClose = true
 
@@ -83,11 +91,14 @@ struct GameView: View {
         self.camera = camera
         self.onExit = onExit
         _scene = State(initialValue: game.makeScene())
+        showsCamera = game.showsCamera
     }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            CameraPreview(session: camera.session).ignoresSafeArea()
+            if showsCamera {
+                CameraPreview(session: camera.session).ignoresSafeArea()
+            }
             SpriteView(scene: scene, preferredFramesPerSecond: 60, options: [.allowsTransparency, .ignoresSiblingOrder],
                        debugOptions: showStats ? [.showsFPS, .showsNodeCount] : [])
                 .ignoresSafeArea()
@@ -146,7 +157,7 @@ struct MenuView: View {
                                 Text(game.emoji).font(.system(size: 96))
                                 Text(game.title).font(.system(size: 34, weight: .bold, design: .rounded))
                             }
-                            .frame(width: 250, height: 210)
+                            .frame(width: 220, height: 200)
                             .background(RoundedRectangle(cornerRadius: 32).fill(game.color.gradient))
                             .foregroundStyle(.white)
                         }
