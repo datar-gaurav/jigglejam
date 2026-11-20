@@ -71,7 +71,13 @@ enum Snapshot {
             writeScene("game-\(game.id.replacingOccurrences(of: ":", with: "-"))", game, backdrop: backdrop,
                        seconds: 2.5, pose: Self.simulatedPlayer)
         }
-        if let bubbles = library.games.first(where: { $0.id == "bubblePop" }) {
+        if let driving = library.games.first(where: { $0.id == "driving" }) {
+            // Close-up driver (head and shoulders only) turning the plate right, then left.
+            for (name, tilt) in [("drive-right", -0.12), ("drive-left", 0.12)] {
+                writeScene(name, driving, backdrop: backdrop, seconds: 3) { Self.closeUpDriver(tilt: tilt) }
+            }
+        }
+                if let bubbles = library.games.first(where: { $0.id == "bubblePop" }) {
             writeScene("overlay-too-close", bubbles, backdrop: backdrop, seconds: 1.4) {
                 var frame = Self.simulatedPlayer()
                 frame.tooClose = true
@@ -156,6 +162,20 @@ enum Snapshot {
         guard let tiff = output.tiffRepresentation,
               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: folder.appendingPathComponent("\(name).png"))
+    }
+
+    /// A child up close holding a plate: only head and shoulders tracked, both hands from the hand
+    /// tracker. `tilt` lifts the left hand and lowers the right (negative = turning right).
+    static func closeUpDriver(tilt: CGFloat) -> PoseFrame {
+        simulatedFrame += 1
+        let points: [Joint: CGPoint] = [
+            .nose: CGPoint(x: 0.5, y: 0.78), .leftEye: CGPoint(x: 0.47, y: 0.8), .rightEye: CGPoint(x: 0.53, y: 0.8),
+            .leftEar: CGPoint(x: 0.44, y: 0.78), .rightEar: CGPoint(x: 0.56, y: 0.78), .neck: CGPoint(x: 0.5, y: 0.62),
+            .leftShoulder: CGPoint(x: 0.36, y: 0.6), .rightShoulder: CGPoint(x: 0.64, y: 0.6),
+        ]
+        let hands = [CGPoint(x: 0.36, y: 0.32 - tilt), CGPoint(x: 0.64, y: 0.32 + tilt)]
+        return PoseFrame(bodies: [points], peopleCount: 1, hands: hands, imageSize: CGSize(width: 1280, height: 720),
+                         timestamp: Double(simulatedFrame) / 60, receivedAt: uptime())
     }
 
     private static var simulatedFrame = 0

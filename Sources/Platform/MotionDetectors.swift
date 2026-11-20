@@ -343,3 +343,51 @@ struct FreezeJudge {
         return still / observed >= successShare ? .froze : .wiggly
     }
 }
+
+/// Picks the two hands to steer with. Hands from the dedicated hand tracker are preferred; each
+/// hand is given to the nearest person, and the pair is used only if both belong to the driver.
+/// (Up close, the body tracker often sees just the head and shoulders, so "is the hand inside the
+/// driver's body box" wrongly rejects hands held at chest height; nearest-person doesn't.)
+/// Falls back to the driver's own wrists or elbows.
+enum WheelHands {
+    struct Pair {
+        var a: CGPoint
+        var b: CGPoint
+        var fromHandTracker: Bool
+    }
+
+    static func pick(hands: [CGPoint], bodies: [Body], driver: Body?) -> Pair? {
+        if hands.count >= 2 {
+            let (h0, h1) = (hands[0], hands[1])
+            let separation = PlayerTracker.distance(h0, h1)
+            if separation > 0.04, belongToDriver([h0, h1], bodies: bodies, driver: driver) {
+                return Pair(a: h0, b: h1, fromHandTracker: true)
+            }
+        }
+        if let driver,
+           let a = driver[.leftWrist] ?? driver[.leftElbow], let b = driver[.rightWrist] ?? driver[.rightElbow] {
+            return Pair(a: a, b: b, fromHandTracker: false)
+        }
+        return nil
+    }
+
+    /// True if every hand's nearest person is the driver (or there's nobody else to confuse it with).
+    static func belongToDriver(_ hands: [CGPoint], bodies: [Body], driver: Body?) -> Bool {
+        guard let driver, bodies.count > 1 else { return true }
+        let driverCenter = PlayerTracker.centroid(of: driver)
+        guard let driverIndex = bodies.firstIndex(where: { PlayerTracker.distance(PlayerTracker.centroid(of: $0), driverCenter) < 0.0001 })
+        else { return true }
+        return hands.allSatisfy { owner(of: $0, among: bodies) == driverIndex }
+    }
+
+    /// Index of the person whose arm (wrist, elbow or shoulder) is closest to the point.
+    static func owner(of point: CGPoint, among bodies: [Body]) -> Int? {
+        let armJoints: [Joint] = [.leftWrist, .rightWrist, .leftElbow, .rightElbow, .leftShoulder, .rightShoulder]
+        func distance(_ body: Body) -> CGFloat {
+            let points = armJoints.compactMap { body[$0] }
+            let candidates = points.isEmpty ? [PlayerTracker.centroid(of: body)] : points
+            return candidates.map { PlayerTracker.distance($0, point) }.min() ?? .infinity
+        }
+        return bodies.indices.min { distance(bodies[$0]) < distance(bodies[$1]) }
+    }
+}

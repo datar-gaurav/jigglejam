@@ -330,29 +330,10 @@ final class DrivingScene: GameScene {
     /// Prefers the dedicated hand tracker (robust up close, plate in front of the body);
     /// falls back to body wrists, then elbows.
     private func plateSteering(_ pose: PoseFrame, frameGap: Double) -> SteeringReading? {
-        // Lock onto one driver, and only accept hands that belong to them.
+        // Lock onto one driver, and only use hands that belong to them (nearest-person rule).
         let driver = driverTracker.update(pose.bodies, frameGap: frameGap)
-        func belongsToDriver(_ p: CGPoint) -> Bool {
-            guard let driver else { return true } // up close the body may not be tracked; can't check
-            return PlayerTracker.bounds(of: driver).insetBy(dx: -0.12, dy: -0.12).contains(p)
-        }
-
-        var pair: (CGPoint, CGPoint)?
-        var fromHands = false
-        if pose.hands.count >= 2 {
-            let (h0, h1) = (pose.hands[0], pose.hands[1])
-            let separation = PlayerTracker.distance(h0, h1)
-            // Two hands on one plate are close-ish; two people's hands are usually far apart.
-            if separation > 0.04, separation < 0.6, belongsToDriver(h0), belongsToDriver(h1) {
-                pair = (h0, h1)
-                fromHands = true
-            }
-        }
-        if pair == nil, let driver,
-           let a = driver[.leftWrist] ?? driver[.leftElbow], let b = driver[.rightWrist] ?? driver[.rightElbow] {
-            pair = (a, b)
-        }
-        guard let (a, b) = pair else { return nil }
+        guard let picked = WheelHands.pick(hands: pose.hands, bodies: pose.bodies, driver: driver) else { return nil }
+        let (a, b, fromHands) = (picked.a, picked.b, picked.fromHandTracker)
         let (left, right) = a.x < b.x ? (a, b) : (b, a)
 
         // Measure the angle on screen so the camera's aspect ratio doesn't distort it.

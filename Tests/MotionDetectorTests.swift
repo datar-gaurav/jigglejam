@@ -360,3 +360,45 @@ extension MotionDetectorTests {
         XCTAssertEqual(judge.verdict(judgedWindow: 2.7), .notEnoughSeen)
     }
 }
+
+// MARK: - Vroom Vroom hand selection
+
+extension MotionDetectorTests {
+    /// Up close, only the head and shoulders are tracked.
+    private func closeUpDriver(x: CGFloat = 0.5) -> Body {
+        [.nose: CGPoint(x: x, y: 0.78), .leftEye: CGPoint(x: x - 0.03, y: 0.8), .rightEye: CGPoint(x: x + 0.03, y: 0.8),
+         .leftEar: CGPoint(x: x - 0.06, y: 0.78), .rightEar: CGPoint(x: x + 0.06, y: 0.78), .neck: CGPoint(x: x, y: 0.62),
+         .leftShoulder: CGPoint(x: x - 0.14, y: 0.6), .rightShoulder: CGPoint(x: x + 0.14, y: 0.6)]
+    }
+
+    /// Regression: hands holding the plate at chest height were rejected because they fell outside
+    /// a close-up driver's head-and-shoulders box, so the car couldn't steer.
+    func testCloseUpDriverHandsAtChestHeightAreUsed() {
+        let driver = closeUpDriver()
+        let hands = [CGPoint(x: 0.36, y: 0.3), CGPoint(x: 0.64, y: 0.24)] // plate held low, tilted
+        let pair = WheelHands.pick(hands: hands, bodies: [driver], driver: driver)
+        XCTAssertNotNil(pair)
+        XCTAssertEqual(pair?.fromHandTracker, true)
+    }
+
+    func testHandsWithNoTrackedBodyAreUsed() {
+        let hands = [CGPoint(x: 0.4, y: 0.5), CGPoint(x: 0.6, y: 0.5)]
+        XCTAssertNotNil(WheelHands.pick(hands: hands, bodies: [], driver: nil))
+    }
+
+    func testAnotherPersonsHandIsNotPairedWithTheDriver() {
+        let driver = closeUpDriver(x: 0.35)
+        var other = closeUpDriver(x: 0.8)
+        other[.rightWrist] = CGPoint(x: 0.9, y: 0.5)
+        let hands = [CGPoint(x: 0.3, y: 0.45), CGPoint(x: 0.9, y: 0.5)] // driver's hand + the other person's
+        let pair = WheelHands.pick(hands: hands, bodies: [driver, other], driver: driver)
+        XCTAssertFalse(pair?.fromHandTracker ?? false, "mixed pair must not steer")
+    }
+
+    func testDriversHandsAreUsedEvenWithSomeoneElseInView() {
+        let driver = closeUpDriver(x: 0.35)
+        let other = closeUpDriver(x: 0.85)
+        let hands = [CGPoint(x: 0.25, y: 0.35), CGPoint(x: 0.45, y: 0.32)]
+        XCTAssertEqual(WheelHands.pick(hands: hands, bodies: [driver, other], driver: driver)?.fromHandTracker, true)
+    }
+}
