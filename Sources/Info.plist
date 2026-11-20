@@ -24,5 +24,7 @@
 	<string>public.app-category.kids-games</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Jiggle Jam uses the camera to see your moves so you can play games with your body.</string>
+	<key>NSCameraUseContinuityCameraDeviceType</key>
+	<true/>
 </dict>
 </plist>

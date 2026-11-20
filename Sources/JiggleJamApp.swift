@@ -146,7 +146,15 @@ struct MenuView: View {
                     }
                     .frame(width: 340)
 
+                    Button("Refresh") { camera.refreshDevices() }
                     Button("Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                }
+
+                if camera.authorization == .authorized && !camera.hasIPhone {
+                    Text("No iPhone camera found. Lock the iPhone, put it in landscape and keep it still near the Mac, then click Refresh.")
+                        .font(.callout)
+                        .foregroundStyle(.yellow)
+                        .multilineTextAlignment(.center)
                 }
 
                 Text("To play on the TV: Control Center → Screen Mirroring → choose your TV, then go Full Screen.")

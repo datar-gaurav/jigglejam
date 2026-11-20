@@ -19,6 +19,7 @@ targets:
         CFBundleDisplayName: Jiggle Jam
         LSApplicationCategoryType: public.app-category.kids-games
         NSCameraUsageDescription: Jiggle Jam uses the camera to see your moves so you can play games with your body.
+        NSCameraUseContinuityCameraDeviceType: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jigglejam.app

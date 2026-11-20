@@ -109,7 +109,9 @@ final class CameraManager: NSObject, ObservableObject {
         devices.first { $0.deviceType == .continuityCamera } ?? devices.first
     }
 
-    private func refreshDevices() {
+    var hasIPhone: Bool { devices.contains { $0.deviceType == .continuityCamera } }
+
+    func refreshDevices() {
         devices = discover()
         guard configured else { return }
         let currentStillThere = devices.contains { $0.uniqueID == currentDeviceID }
