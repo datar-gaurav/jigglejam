@@ -154,6 +154,7 @@ struct MenuView: View {
     let onPlay: (GameEntry) -> Void
     let onMeasureLatency: () -> Void
     @AppStorage("warnTooClose") private var warnTooClose = true
+    @AppStorage(CameraPicture.key) private var showPicture = true
     @State private var showTVHelp = false
     @StateObject private var soundCheck = SoundCheck()
 
@@ -313,6 +314,13 @@ struct MenuView: View {
 
             barDivider
 
+            Toggle(isOn: $showPicture) {
+                Text("Camera picture").font(.system(size: 13, weight: .medium))
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .help("Show the camera picture. Off hides it everywhere; the camera still watches your moves so games work.")
+
             Toggle(isOn: $warnTooClose) {
                 Text("Too-close warning").font(.system(size: 13, weight: .medium))
             }
@@ -421,10 +429,15 @@ struct MenuView: View {
 struct TrackingWindow: View {
     let camera: CameraManager
     let scene: GameScene
+    @AppStorage(CameraPicture.key) private var showPicture = true
 
     var body: some View {
         ZStack {
-            CameraPreview(session: camera.session)
+            if showPicture {
+                CameraPreview(session: camera.session)
+            } else {
+                Color(white: 0.08)
+            }
             TrackingOverlay(camera: camera) { frame in
                 "✋ \(frame.hands.count)  🧍 \(frame.bodies.count)  \(scene.debugText)"
             }

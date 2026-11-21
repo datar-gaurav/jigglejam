@@ -29,12 +29,14 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
 - **Fox Trail** — a side-scrolling walk with an original fox hero. March in place to walk
   (knees taking turns), jump to jump. No enemies or pits: crates block the way until you jump
   over or onto them, fruit to collect, and a party at home at the end of each level.
-- **Garden Guard** — hungry bugs crawl across three garden rows toward the veggies. Catch falling
-  seeds, hold a hand over a dirt patch to plant a berry flower, and flowers toss berries at bugs
-  in their row until they're full and float away happy. Touching a bug feeds it too, and a jump
-  makes every flower throw a berry blast. Hands are mapped by arm's reach, so every patch can be
-  reached without walking around. Nothing is lost: a bug that reaches a veggie takes a nibble
-  and wanders off, and every wave ends with "Garden saved!".
+- **Garden Guard** — silly zombies shuffle down five garden lanes toward the veggies at the
+  bottom. Catch falling seeds and eggs, hold a hand over a dirt patch to plant, and plants throw
+  food up their lane: sunflowers toss berries, hens (planted from eggs) throw eggs that fill twice
+  as much. A full zombie floats away happy with a heart. Touching a zombie feeds it too, and a jump
+  makes every plant throw. Later waves bring quick and slow zombies, and a big hungry one at the
+  end. Hands are mapped by arm's reach, so every patch can be reached without walking around.
+  Nothing is lost: a zombie that reaches a veggie takes a nibble and wanders off, and every wave
+  ends with "Garden saved!".
 
 Every game starts with a short **setup**: a big mirrored view with what the camera sees, one
 spoken instruction and a checklist (hands, feet, wheel held flat…). It says "Ready!" once
@@ -42,6 +44,9 @@ everything is ✅ for a second, or starts anyway after 10 seconds; Return skips 
 
 Fox Trail's first level begins with practice ("March to walk!", then "Now jump!"). In the
 jumping games, three "almost jumps" in a row make jumping easier ("Little jumps work too!").
+
+Switch off **Camera picture** in the menu to hide the camera picture everywhere (menu, setup
+and games show a colorful backdrop instead). The camera keeps watching, so games still work.
 
 If a player gets so close that their feet leave the frame, the game pauses with a
 "take a big step back" warning. Turn it off with **Warn when too close** in the menu.
