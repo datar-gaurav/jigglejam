@@ -39,5 +39,12 @@ enum BuiltInGames {
             setupRequirements: [.seen, .knees, .feet], pack: nil,
             makeScene: { FoxTrailScene(size: CGSize(width: 1280, height: 720)) }
         ),
+        GameEntry(
+            id: "gardenGuard", title: "Garden Guard", emoji: "🌻", color: .mint,
+            showsCamera: false, needsFullBody: true,
+            setupInstruction: "Stand back and wave your hands up high!",
+            setupRequirements: [.seen, .hands, .feet], pack: nil,
+            makeScene: { GardenGuardScene(size: CGSize(width: 1280, height: 720)) }
+        ),
     ]
 }

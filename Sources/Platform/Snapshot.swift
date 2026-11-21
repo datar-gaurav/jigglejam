@@ -77,7 +77,11 @@ enum Snapshot {
                 writeScene(name, driving, backdrop: backdrop, seconds: 3) { Self.closeUpDriver(tilt: tilt) }
             }
         }
-                if let bubbles = library.games.first(where: { $0.id == "bubblePop" }) {
+        if let garden = library.games.first(where: { $0.id == "gardenGuard" }) {
+            // A child sweeping a hand along the middle row: plants flowers, then bugs arrive.
+            writeScene("garden-play", garden, backdrop: backdrop, seconds: 16, pose: Self.gardener)
+        }
+        if let bubbles = library.games.first(where: { $0.id == "bubblePop" }) {
             writeScene("overlay-too-close", bubbles, backdrop: backdrop, seconds: 1.4) {
                 var frame = Self.simulatedPlayer()
                 frame.tooClose = true
@@ -179,6 +183,22 @@ enum Snapshot {
     }
 
     private static var simulatedFrame = 0
+
+    /// A standing child holding the right hand out at chest height and slowly sweeping it
+    /// left and right (in arm's-reach terms: across the middle garden row).
+    static func gardener() -> PoseFrame {
+        var frame = simulatedPlayer()
+        let t = Double(simulatedFrame) / 60
+        guard var body = frame.bodies.first else { return frame }
+        let x = 0.5 + CGFloat(sin(t * 0.8)) * 0.12
+        body[.rightElbow] = CGPoint(x: (0.56 + x) / 2, y: 0.66)
+        body[.rightWrist] = CGPoint(x: x, y: 0.67)
+        body[.leftElbow] = CGPoint(x: 0.42, y: 0.55)
+        body[.leftWrist] = CGPoint(x: 0.43, y: 0.44)
+        frame.bodies = [body]
+        frame.poppers = CameraManager.poppers(from: body)
+        return frame
+    }
 
     /// A child standing mid-frame, waving, with feet in view: enough for every game to run.
     static func simulatedPlayer() -> PoseFrame {
