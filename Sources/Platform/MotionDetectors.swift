@@ -391,3 +391,43 @@ enum WheelHands {
         return bodies.indices.min { distance(bodies[$0]) < distance(bodies[$1]) }
     }
 }
+
+// MARK: - Arm's-reach mapping
+
+/// Maps a player's hands into a 0...1 square relative to their own body, so a child standing
+/// still can reach every corner of the screen just by stretching: hands hanging down land at the
+/// bottom edge, hands stretched up at the top, arms out wide at the sides. Unlike raw camera
+/// coordinates, this doesn't depend on where in the frame the child stands or how far back.
+enum ReachMapper {
+    /// Horizontal reach either side of the neck, in torso lengths.
+    static var sideReach: CGFloat = 1.3
+    /// Vertical range, in torso lengths above the hips: bottom of the screen ... top.
+    static var lowReach: CGFloat = -0.3
+    static var highReach: CGFloat = 2.3
+
+    /// Each hand of `body` (wrist nudged toward the palm), mapped to 0...1 and clamped.
+    static func hands(of body: Body, imageSize: CGSize) -> [CGPoint] {
+        guard let neck = body[.neck] ?? midpoint(body[.leftShoulder], body[.rightShoulder]),
+              let hips = body[.root] ?? midpoint(body[.leftHip], body[.rightHip]) else { return [] }
+        let torso = (neck.y - hips.y) * imageSize.height
+        guard torso > 1 else { return [] }
+
+        var result: [CGPoint] = []
+        for (wrist, elbow) in [(Joint.leftWrist, Joint.leftElbow), (.rightWrist, .rightElbow)] {
+            guard let w = body[wrist] else { continue }
+            var hand = w
+            if let e = body[elbow] { hand = CGPoint(x: w.x + (w.x - e.x) * 0.3, y: w.y + (w.y - e.y) * 0.3) }
+            let dx = (hand.x - neck.x) * imageSize.width / torso
+            let dy = (hand.y - hips.y) * imageSize.height / torso
+            let x = (dx + sideReach) / (2 * sideReach)
+            let y = (dy - lowReach) / (highReach - lowReach)
+            result.append(CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1)))
+        }
+        return result
+    }
+
+    private static func midpoint(_ a: CGPoint?, _ b: CGPoint?) -> CGPoint? {
+        guard let a, let b else { return nil }
+        return CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    }
+}

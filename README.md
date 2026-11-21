@@ -29,6 +29,12 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
 - **Fox Trail** — a side-scrolling walk with an original fox hero. March in place to walk
   (knees taking turns), jump to jump. No enemies or pits: crates block the way until you jump
   over or onto them, fruit to collect, and a party at home at the end of each level.
+- **Garden Guard** — hungry bugs crawl across three garden rows toward the veggies. Catch falling
+  seeds, hold a hand over a dirt patch to plant a berry flower, and flowers toss berries at bugs
+  in their row until they're full and float away happy. Touching a bug feeds it too, and a jump
+  makes every flower throw a berry blast. Hands are mapped by arm's reach, so every patch can be
+  reached without walking around. Nothing is lost: a bug that reaches a veggie takes a nibble
+  and wanders off, and every wave ends with "Garden saved!".
 
 Every game starts with a short **setup**: a big mirrored view with what the camera sees, one
 spoken instruction and a checklist (hands, feet, wheel held flat…). It says "Ready!" once
@@ -76,7 +82,7 @@ detectors: jumps, squats, marching, single-knee lifts, tracking gaps and player 
 1. **Camera:** pick it in the menu. An iPhone appears automatically as a Continuity Camera
    (same Apple ID, Wi‑Fi + Bluetooth on). Mount it in landscape below/above the TV.
 2. **TV:** Control Center → Screen Mirroring → your Apple TV / AirPlay TV.
-3. Click **Full Screen**, press **1**–**5** (or click a game) to start, **Esc** to go back to the menu.
+3. Click **Full Screen**, press **1**–**6** (or click a game) to start, **Esc** to go back to the menu.
 4. Stand 2–3 m back so the camera sees the whole body (the menu tells you when it does).
 
 ## Display delay test
