@@ -35,6 +35,24 @@ extension View {
     }
 }
 
+/// The "Camera picture" setting: off hides the camera picture everywhere (menu, setup and games),
+/// for privacy or a calmer screen. Tracking keeps working; only the picture is hidden.
+enum CameraPicture {
+    static let key = "showCameraPicture"
+
+    /// Stands in for the camera picture: a deep, playful gradient with soft brand glows.
+    struct Hidden: View {
+        var body: some View {
+            ZStack {
+                LinearGradient(colors: [Color(red: 0.16, green: 0.14, blue: 0.38), Color(red: 0.07, green: 0.09, blue: 0.2)],
+                               startPoint: .top, endPoint: .bottom)
+                RadialGradient(colors: [Theme.pink.opacity(0.35), .clear], center: .topLeading, startRadius: 0, endRadius: 700)
+                RadialGradient(colors: [Theme.blue.opacity(0.35), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 760)
+            }
+        }
+    }
+}
+
 /// Dimmed live camera with soft brand glows: the player can still see themselves behind the menu.
 struct MenuBackground: View {
     let camera: CameraManager

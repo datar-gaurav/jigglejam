@@ -4,12 +4,16 @@ import SpriteKit
 import Metal
 
 /// The live camera, or a neutral stand-in when rendering snapshots (no real camera imagery is
-/// ever written into a snapshot).
+/// ever written into a snapshot). When the camera picture is switched off in the menu, a
+/// colorful backdrop takes its place: the camera still runs so the games can see the player.
 struct CameraBackground: View {
     let session: AVCaptureSession
+    @AppStorage(CameraPicture.key) private var showPicture = true
 
     var body: some View {
-        if Snapshot.isActive {
+        if !showPicture && !Snapshot.isActive {
+            CameraPicture.Hidden()
+        } else if Snapshot.isActive {
             ZStack {
                 LinearGradient(colors: [Color(red: 0.42, green: 0.36, blue: 0.32), Color(red: 0.18, green: 0.16, blue: 0.15)],
                                startPoint: .top, endPoint: .bottom)
