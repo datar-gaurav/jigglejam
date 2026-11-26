@@ -85,6 +85,10 @@ enum Snapshot {
             // A child sweeping a hand along the middle row: plants flowers, then bugs arrive.
             writeScene("garden-play", garden, backdrop: backdrop, seconds: 16, pose: Self.gardener)
         }
+        if let train = library.games.first(where: { $0.id == "wordTrain" }) {
+            // A child reaching for letter boxes, one spot after another: fills a carriage.
+            writeScene("word-train-play", train, backdrop: backdrop, seconds: 9, pose: Self.letterReacher)
+        }
         if let bubbles = library.games.first(where: { $0.id == "bubblePop" }) {
             writeScene("overlay-too-close", bubbles, backdrop: backdrop, seconds: 1.4) {
                 var frame = Self.simulatedPlayer()
@@ -199,6 +203,28 @@ enum Snapshot {
         body[.rightWrist] = CGPoint(x: x, y: 0.67)
         body[.leftElbow] = CGPoint(x: 0.42, y: 0.55)
         body[.leftWrist] = CGPoint(x: 0.43, y: 0.44)
+        frame.bodies = [body]
+        frame.poppers = CameraManager.poppers(from: body)
+        return frame
+    }
+
+    /// A standing child reaching one hand to each Word Train letter spot in turn (left hand on
+    /// the left, right hand on the right), so a box gets touched every second or so.
+    static func letterReacher() -> PoseFrame {
+        var frame = simulatedPlayer()
+        let t = Double(simulatedFrame) / 60
+        guard var body = frame.bodies.first else { return frame }
+        // Inverse of ReachMapper for the simulated child (neck 0.5/0.7, hips 0.5/0.45, 1280x720).
+        func wrist(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            let torso: CGFloat = 0.25 * 720
+            return CGPoint(x: 0.5 + (x * 2 * ReachMapper.sideReach - ReachMapper.sideReach) * torso / 1280,
+                           y: 0.45 + (ReachMapper.lowReach + y * (ReachMapper.highReach - ReachMapper.lowReach)) * torso / 720)
+        }
+        let spots: [CGPoint] = [CGPoint(x: 0.12, y: 0.74), CGPoint(x: 0.27, y: 0.6), CGPoint(x: 0.12, y: 0.44)]
+        let k = Int(t / 1.1) % spots.count
+        let left = wrist(spots[k].x, spots[k].y), right = wrist(1 - spots[(k + 1) % 3].x, spots[(k + 1) % 3].y)
+        body[.leftWrist] = left; body[.leftElbow] = left
+        body[.rightWrist] = right; body[.rightElbow] = right
         frame.bodies = [body]
         frame.poppers = CameraManager.poppers(from: body)
         return frame

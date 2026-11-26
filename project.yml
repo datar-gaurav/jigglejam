@@ -50,6 +50,7 @@ targets:
       - path: Tests
       - path: Sources/Platform/PoseTypes.swift
       - path: Sources/Platform/MotionDetectors.swift
+      - path: Sources/Games/WordTrainWords.swift
       - path: Sources/Platform/Packs/GamePack.swift
       - path: Sources/Platform/Packs/ScriptHost.swift
       - path: Sources/Platform/Packs/ScriptRunner.swift

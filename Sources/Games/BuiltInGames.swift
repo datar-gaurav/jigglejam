@@ -46,5 +46,12 @@ enum BuiltInGames {
             setupRequirements: [.seen, .hands, .feet], pack: nil,
             makeScene: { GardenGuardScene(size: CGSize(width: 1280, height: 720)) }
         ),
+        GameEntry(
+            id: "wordTrain", title: "Word Train", emoji: "🚂", color: .indigo,
+            showsCamera: false, needsFullBody: true,
+            setupInstruction: "Stand back and wave your hands up high!",
+            setupRequirements: [.seen, .hands, .knees], pack: nil,
+            makeScene: { WordTrainScene(size: CGSize(width: 1280, height: 720)) }
+        ),
     ]
 }

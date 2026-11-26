@@ -37,6 +37,14 @@ game reacts to their hands and feet. AirPlay the Mac to the TV and play from the
   end. Hands are mapped by arm's reach, so every patch can be reached without walking around.
   Nothing is lost: a zombie that reaches a veggie takes a nibble and wanders off, and every wave
   ends with "Garden saved!".
+- **Word Train** — early spelling and reading. A train pulls in with empty carriages and a picture
+  (🐱); touch the right floating letter box and it flies into its carriage. Once the word is full,
+  each carriage lights up as its letter is said, then the word is read ("see, ay, tee… cat!"), the
+  picture hops aboard, and marching in place drives the train away. Four levels, five words each:
+  the first letter, one missing letter anywhere, the whole word, then four-letter words. Letters
+  are lowercase and spoken by name; rhyming words often come one after another. A wrong letter
+  just says its name, the right box glows after two misses, and the train leaves by itself if
+  nobody marches.
 
 Every game starts with a short **setup**: a big mirrored view with what the camera sees, one
 spoken instruction and a checklist (hands, feet, wheel held flat…). It says "Ready!" once
